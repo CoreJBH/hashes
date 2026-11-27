@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Hashes" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/background</item>
-        <item name="android:statusBarColor">@color/background</item>
-        <item name="android:navigationBarColor">@color/background</item>
+        <item name="android:windowBackground">@color/crt_background</item>
+        <item name="android:colorBackground">@color/crt_background</item>
+        <item name="android:statusBarColor">@color/crt_background</item>
+        <item name="android:navigationBarColor">@color/crt_background</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>

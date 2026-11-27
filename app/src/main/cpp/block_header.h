@@ -98,18 +98,19 @@ static inline void hashes_block_header_hash(const hashes_block_job *job, uint32_
  * bytes read little-endian - which is why a block is displayed with its zeros in
  * front. So the leading digits of the hash are the *last* digest bytes, and the
  * comparison walks one array forwards and the other backwards.
+ *
+ * The comparison is "at or below": a hash exactly equal to the target is a valid
+ * share (bitcoin's own check is cmp <= 0), so equality is a meet, not a miss.
  */
 static inline int hashes_hash_meets_target(const uint8_t hash[HASHES_SHA256_DIGEST_SIZE],
                                            const uint8_t target[HASHES_TARGET_SIZE]) {
-    int below = 0;
     for (int i = 0; i < HASHES_SHA256_DIGEST_SIZE; ++i) {
         uint8_t digit = hash[HASHES_SHA256_DIGEST_SIZE - 1 - i];
         if (digit != target[i]) {
-            below = digit < target[i];
-            break;
+            return digit < target[i];
         }
     }
-    return below;
+    return 1;
 }
 
 /* Work of a hash: the difficulty-1 target divided by the hash, as a double. */

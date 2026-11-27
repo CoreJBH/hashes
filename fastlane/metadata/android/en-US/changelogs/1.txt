@@ -1,0 +1,1 @@
+First public build: solo Stratum V1 mining, monochrome CRT terminal, live hash stream, payout address validation with paste and QR scan, COOL and TURBO modes.

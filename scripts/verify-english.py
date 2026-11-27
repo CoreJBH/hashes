@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Fail if any text file in the project contains non-English script characters.
+"""Check the two rules every Hashes source file keeps.
 
-The project rule is simple: every UI string, comment, document and workflow is written
-in English. This script scans the repository (skipping build output, binary assets and the
-Gradle wrapper jar) and reports every character outside the Latin/ASCII range that
-belongs to a non-Latin script.
+1. English only. No Hangul, CJK, kana, Cyrillic, Greek, Arabic, Hebrew,
+   Devanagari, Thai or full-width characters in any text file: UI strings,
+   comments, documents, store metadata and scripts alike.
+2. The brand string "corejbh" appears nowhere except inside the package
+   identifier itself: a qualified `com.corejbh.hashes...` reference in code, its
+   slash form `com/corejbh/hashes`, and the JNI symbols derived from it
+   (`Java_com_corejbh_hashes_engine_NativeMiner_nativeStart`). UI text, resources,
+   store metadata, prompts, user agents and worker names are all in scope.
 
 Usage:
     python3 scripts/verify-english.py [path]
@@ -15,16 +19,21 @@ Exit code 0 means the tree is clean, 1 means at least one violation was found.
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 SKIP_DIRS = {
     ".git",
     ".gradle",
-    "build",
-    ".idea",
     ".kotlin",
-    "out",
+    ".idea",
+    "build",
     "cxx",
+    ".cxx",
+    ".externalNativeBuild",
+    "out",
+    "__pycache__",
+    "node_modules",
 }
 
 TEXT_SUFFIXES = {
@@ -57,6 +66,7 @@ BINARY_SUFFIXES = {
     ".jpeg",
     ".webp",
     ".apk",
+    ".aab",
     ".jar",
     ".aar",
     ".so",
@@ -65,10 +75,11 @@ BINARY_SUFFIXES = {
     ".keystore",
     ".jks",
     ".zip",
+    ".ttf",
+    ".otf",
 }
 
-# Ranges for scripts that must never appear: Hangul, CJK ideographs, Kana, Cyrillic,
-# Greek, Arabic, Hebrew, Devanagari, Thai and full-width forms.
+# Ranges for scripts that must never appear.
 FORBIDDEN_RANGES = (
     (0x1100, 0x11FF),   # Hangul Jamo
     (0x2E80, 0x2FDF),   # CJK radicals
@@ -93,16 +104,27 @@ FORBIDDEN_RANGES = (
 # Characters that are allowed even though they sit outside ASCII: the typographic
 # characters a document may reasonably use.
 ALLOWED_CHARACTERS = {
-    "\u00b7",  # middle dot
-    "\u2018", "\u2019",  # curly single quotes
-    "\u201c", "\u201d",  # curly double quotes
-    "\u2013", "\u2014",  # en dash, em dash
-    "\u2026",  # ellipsis
-    "\u20bf",  # bitcoin sign
-    "\u2192",  # right arrow
-    "\u2713",  # check mark
-    "\u00a0",  # non-breaking space
+    "\u00b7",              # middle dot
+    "\u2018", "\u2019",    # curly single quotes
+    "\u201c", "\u201d",    # curly double quotes
+    "\u2013", "\u2014",    # en dash, em dash
+    "\u2026",              # ellipsis
+    "\u00a0",              # non-breaking space
+    "\u20bf",              # bitcoin sign
+    "\u2192",              # right arrow
+    "\u2713",              # check mark
 }
+
+# The brand may appear only as part of the package identifier, in source as
+# `com.corejbh.hashes...` and in the JNI symbol names derived from it.
+BRAND = re.compile(r"corejbh", re.IGNORECASE)
+
+BRAND_ALLOWED_CONTEXTS = (
+    re.compile(r"com\.corejbh\.hashes\b"),
+    re.compile(r"com/corejbh/hashes\b"),
+    re.compile(r"Java_com_corejbh_hashes_\w*"),
+    re.compile(r'namespace\s*=\s*"com\.corejbh\.hashes"'),
+)
 
 
 def is_forbidden(character: str) -> bool:
@@ -115,11 +137,19 @@ def is_forbidden(character: str) -> bool:
     return False
 
 
+def brand_is_allowed(line: str) -> bool:
+    remainder = line
+    for pattern in BRAND_ALLOWED_CONTEXTS:
+        remainder = pattern.sub("", remainder)
+    return BRAND.search(remainder) is None
+
+
 def iter_files(root: str):
     for current_root, dirs, files in os.walk(root):
         dirs[:] = [
-            d for d in dirs
-            if d not in SKIP_DIRS and not os.path.join(current_root, d).endswith("build")
+            name for name in dirs
+            if name not in SKIP_DIRS
+            and not os.path.join(current_root, name).endswith("build")
         ]
         for name in files:
             path = os.path.join(current_root, name)
@@ -132,28 +162,36 @@ def iter_files(root: str):
 
 
 def main() -> int:
-    root = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    violations = []
+    default_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root = sys.argv[1] if len(sys.argv) > 1 else default_root
+    script = os.path.abspath(__file__)
+
+    violations: list[str] = []
 
     for path in sorted(iter_files(root)):
+        relative = os.path.relpath(path, root)
+        # This file spells the forbidden ranges and the brand pattern, so its own
+        # brand check is skipped; its English check still runs.
+        is_script = os.path.abspath(path) == script
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 lines = handle.readlines()
         except (UnicodeDecodeError, OSError):
             continue
         for number, line in enumerate(lines, start=1):
-            bad = [ch for ch in line if is_forbidden(ch)]
+            bad = sorted({character for character in line if is_forbidden(character)})
             if bad:
-                sample = "".join(sorted(set(bad)))
-                violations.append(f"{os.path.relpath(path, root)}:{number}: {sample}")
+                violations.append(f"{relative}:{number}: non-English character(s) {''.join(bad)}")
+            if not is_script and BRAND.search(line) and not brand_is_allowed(line):
+                violations.append(f"{relative}:{number}: brand string outside the package name")
 
     if violations:
-        print("Non-English characters found:")
+        print("Violations found:")
         for violation in violations:
             print("  " + violation)
         return 1
 
-    print("OK: no non-English script characters found.")
+    print("OK: English only, and the brand appears only inside the package name.")
     return 0
 
 

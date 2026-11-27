@@ -3,38 +3,114 @@ package com.corejbh.hashes
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import com.corejbh.hashes.ui.HashesTheme
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.corejbh.hashes.ui.MinerScreen
+import com.corejbh.hashes.ui.MinerViewModel
+import com.corejbh.hashes.ui.SplashScreen
+import com.corejbh.hashes.ui.components.SettingsSheet
+import com.corejbh.hashes.ui.scan.QrScannerScreen
+import com.corejbh.hashes.ui.theme.HashesTheme
 
-/**
- * One screen for now: the Phase 1 placeholder that runs the engine against a
- * fixed header so the native core can be seen working on a device.
- *
- * The session is created here rather than inside composition so the activity's
- * lifecycle is what opens and closes the engine, and screen-off is what stops
- * it.
- */
 class MainActivity : ComponentActivity() {
-
-    private lateinit var session: MinerSession
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        session = MinerSession(this)
         setContent {
             HashesTheme {
-                MinerScreen(session)
+                HashesApp()
+            }
+        }
+    }
+}
+
+@Composable
+fun HashesApp(viewModel: MinerViewModel = viewModel()) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    var showSplash by rememberSaveable { mutableStateOf(true) }
+    var showSettings by remember { mutableStateOf(false) }
+    var showScanner by remember { mutableStateOf(false) }
+    var scannedValue by remember { mutableStateOf<String?>(null) }
+
+    // Mining only runs while this screen is visible, so the screen must not sleep
+    // under it. The flag is dropped the moment the session stops.
+    val view = LocalView.current
+    DisposableEffect(state.mining) {
+        view.keepScreenOn = state.mining
+        onDispose { view.keepScreenOn = false }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) viewModel.onScreenHidden()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Crossfade(
+        targetState = showSplash,
+        animationSpec = tween(durationMillis = 420),
+        label = "boot",
+    ) { splash ->
+        if (splash) {
+            SplashScreen(onFinished = { showSplash = false })
+        } else {
+            Box(Modifier.fillMaxSize()) {
+                MinerScreen(
+                    state = state,
+                    onToggleMining = {
+                        if (state.mining) {
+                            viewModel.stopMining()
+                        } else if (!viewModel.startMining()) {
+                            showSettings = true
+                        }
+                    },
+                    onTurboChange = viewModel::setTurbo,
+                    onOpenSettings = { showSettings = true },
+                    onResetGuard = viewModel::clearThermalGuard,
+                )
             }
         }
     }
 
-    override fun onPause() {
-        super.onPause()
-        session.pause()
+    if (showSettings) {
+        SettingsSheet(
+            state = state,
+            scannedValue = scannedValue,
+            onScannedHandled = { scannedValue = null },
+            onScanRequest = { showScanner = true },
+            onApply = { settings ->
+                viewModel.applySettings(settings)
+                showSettings = false
+            },
+            onDismiss = { showSettings = false },
+        )
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        session.close()
+    if (showScanner) {
+        QrScannerScreen(
+            onResult = { text ->
+                scannedValue = text
+                showScanner = false
+            },
+            onClose = { showScanner = false },
+        )
     }
 }

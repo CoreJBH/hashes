@@ -1,0 +1,33 @@
+Hashes is a solo Bitcoin miner that looks like the terminal it is.
+
+It hashes real mainnet block headers from a solo pool, shows every hash as it is produced, and pays any block it finds straight to a Bitcoin address you type or scan. There is no account, no wallet, no seed phrase and no private key: the only thing the app ever asks for is the address that should receive a reward.
+
+WHAT IT DOES NOT DO
+- It does not simulate mining. The nonce counter, the double SHA-256 output and the hash stream are the values the device is actually producing.
+- It does not promise a block. Solo mining is a lottery: the odds line on screen is the honest expected time at your current hash rate.
+- It does not run in the background, and it does not keep mining with the screen off.
+
+HOW IT MINES
+- Assembled from a Stratum V1 solo pool: subscribe, authorize, notify, set difficulty and submit.
+- TLS first. The payout address travels in the login line, so a pool that offers Stratum over TLS is dialled over TLS with certificate and host name verification.
+- COOL is the default: a short hash window per screen frame keeps the CPU share small and the phone cool, while the terminal still updates at 30 frames per second.
+- TURBO uses the ARMv8 SHA-256 instructions and more than one worker thread, and steps back automatically when the device gets hot.
+- Found shares are submitted with the job they belong to. A reconnect never reuses a stale job and no share is ever invented to look busy.
+
+THE TERMINAL
+- Monochrome phosphor green on near black, one font, scanlines, no decoration that is not information.
+- BLOCK_HEIGHT, PREV_HASH, PAYOUT_ADDR, NET_TARGET and NONCE_COUNTER for the job being hashed.
+- LIVE_HASH_STREAM shows the last ten hashes; a hash with four or more leading zeros is inverted so a near miss is visible at a glance.
+- SESSION_BEST_SHARE and ALL_TIME_BEST keep the best hash this device has produced, the second one across restarts.
+- POOL & PAYOUT opens the pool presets, a custom endpoint field, and the payout target prompt with paste and QR scan.
+
+PAYOUT ADDRESS
+The address is checked before it is used: Base58Check for 1... and 3..., Bech32 for bc1q..., Bech32m for bc1p..., with the checksum verified and testnet addresses refused. A QR code from a wallet is parsed down to the address itself and then checked the same way.
+
+PRIVACY
+No analytics, no accounts, no Google Play Services. The only network connection is the pool you chose. The app is open source and builds from source without proprietary dependencies.
+
+REQUIREMENTS
+Android 8.0 or newer. An arm64 device gets the native ARMv8 SHA-256 path; anything else runs the slower Kotlin engine.
+
+Mining on a phone is a hobby, not a business. Expect nothing, enjoy the terminal.

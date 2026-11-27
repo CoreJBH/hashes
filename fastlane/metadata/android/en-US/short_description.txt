@@ -1,0 +1,1 @@
+Solo Bitcoin miner with a monochrome green CRT terminal

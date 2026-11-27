@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- API 31 draws its own splash window before the first Compose frame; it
+         uses the app mark on the same black field, so the handover to the
+         Compose splash has no colour flash. -->
+    <style name="Theme.Hashes" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/crt_background</item>
+        <item name="android:colorBackground">@color/crt_background</item>
+        <item name="android:statusBarColor">@color/crt_background</item>
+        <item name="android:navigationBarColor">@color/crt_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowSplashScreenBackground">@color/crt_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/crt_background</item>
+    </style>
+</resources>

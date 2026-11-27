@@ -169,8 +169,13 @@ bool NativeMiner::start(const uint8_t header_prefix[HASHES_HEADER_PREFIX_SIZE],
     try {
         spawn_workers_locked();
     } catch (...) {
+        /* A thread that could not be created is not the only thing here: the ones
+         * that were created are joinable, and a joinable std::thread destroyed
+         * without a join calls std::terminate. Let them see running_ == false and
+         * join them, then report the failure. */
         running_.store(false, std::memory_order_release);
-        workers_.clear();
+        wake_cv_.notify_all();
+        join_workers_locked();
         state_.store(State::Error, std::memory_order_release);
         return false;
     }

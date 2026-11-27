@@ -9,7 +9,8 @@ matches, the two halves plug together with no changes above the bridge.
 - File: `libhashes.so`
 - ABI: `arm64-v8a` only (the pure C fallback inside the native core is for
   emulators and native tests, not a second APK ABI)
-- Location: `app/src/main/jniLibs/arm64-v8a/libhashes.so`
+- Location: built by CMake from `app/src/main/cpp` into the APK
+  (`lib/arm64-v8a/libhashes.so`); no prebuilt file is committed
 - Load: `System.loadLibrary("hashes")` from `NativeMiner`; a load failure is not
   fatal: `available` becomes false and the app runs the Kotlin fallback engine.
 
@@ -23,6 +24,7 @@ that singleton class. The expected symbols:
 Java_com_corejbh_hashes_engine_NativeMiner_nativeStart
 Java_com_corejbh_hashes_engine_NativeMiner_nativeUpdateWork
 Java_com_corejbh_hashes_engine_NativeMiner_nativeSetTurboMode
+Java_com_corejbh_hashes_engine_NativeMiner_nativeSetThreadCap
 Java_com_corejbh_hashes_engine_NativeMiner_nativeStop
 Java_com_corejbh_hashes_engine_NativeMiner_nativePollCounters
 Java_com_corejbh_hashes_engine_NativeMiner_nativePollCurrentHash
@@ -74,6 +76,13 @@ Switches between COOL (one thread, duty cycle) and TURBO (multi-thread, ARMv8
 SHA-256 path, worker priority `THREAD_PRIORITY_BACKGROUND`). Safe to call while
 running, and safe to call before `start`.
 
+### `nativeSetThreadCap(jint threads)`
+
+Caps how many workers TURBO may use: the thermal step between full speed and
+COOL. Clamped to 1..worker limit; the worker set restarts only when the number
+actually changes. Safe before `start`. Called by the thermal guard on MODERATE,
+and with 1 on the first SEVERE reading.
+
 ### `nativeStop()`
 
 Stops the workers and joins them. Must be idempotent. Must not block longer than
@@ -102,12 +111,12 @@ Kotlin polls about 30 times per second. Each poll must be a consistent read of a
 The most recently hashed digest, internal (little-endian) order. May be any
 recent value; Kotlin reverses it for display.
 
-### `nativePollBestHash(jbyteArray out)` - returns 1 when a best hash exists
+### `nativePollBestHash(jbyteArray out)` - returns `jboolean`
 
-Best digest this job, internal order. Return 0 and leave the array alone when no
-hash has been recorded.
+Best digest this job, internal order. Return false and leave the array alone when
+no hash has been recorded.
 
-### `nativePollFoundHash(jbyteArray out)` - returns the nonce, or -1
+### `nativePollFoundHash(jbyteArray out)` - returns the nonce as `jlong`, or -1
 
 A hash that met the target, drained by Kotlin so it can be submitted to the pool.
 Fill `out` with the digest (internal order) and return the 32-bit nonce. The
@@ -135,9 +144,10 @@ Human-readable core version, shown in the settings sheet. It is not parsed.
 COOL means one worker that hashes for `dutyHashMicros` and sleeps for
 `dutySleepMicros` per 33 ms frame, keeping the CPU share under about 5% while the
 terminal still refreshes at 30 fps. TURBO means continuous hashing on the worker
-set; the thermal guard on the Kotlin side turns TURBO back off when the device
-reports severe thermal status, so the native side only has to honour
-`nativeSetTurboMode(false)` promptly.
+set. The Kotlin thermal guard is the only thing that changes either from a
+reading: it calls `nativeSetThreadCap` on MODERATE and the first SEVERE reading,
+and `nativeSetTurboMode(false)` after a second consecutive SEVERE one, so the
+native side only has to honour both calls promptly.
 
 ## States the UI reads
 

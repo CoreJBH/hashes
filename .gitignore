@@ -6,6 +6,7 @@ captures/
 *.hprof
 local.properties
 .cxx/
+.externalNativeBuild/
 
 # IDE
 .idea/
@@ -27,5 +28,6 @@ keystore.properties
 __pycache__/
 *.pyc
 
-# Native test binaries
+# Native test binaries and JVM crash logs
 scripts/out/
+hs_err_pid*.log

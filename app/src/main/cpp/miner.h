@@ -101,8 +101,8 @@ public:
     /* Cumulative hashes per worker slot, for the htop-style worker panel.
      * Writes one slot per worker of the current mode and returns that count:
      * slots at or past it are written as zero, so a thread cap change never
-     * leaves an old total behind. Counters accumulate across jobs within a
-     * session and are cleared when a session starts. */
+     * leaves an old total behind. Counters belong to the job and are cleared
+     * with the job total. */
     int fill_thread_hashes(int64_t out[kMaxThreads]);
 
     /* The most recently hashed digest, internal order. False when none yet. */

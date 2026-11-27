@@ -116,9 +116,10 @@ is always eight long.
 
 Kotlin differences two reads of this array to draw the terminal's per-worker bars
 and never derives one worker's rate from another's, so the counter must be
-per-thread and must count the same hashes the total does. Totals accumulate across
-jobs within a session (a new job does not clear them) and start from zero when
-`nativeStart` begins a session.
+per-thread and must count the same hashes the total does. Like the job total, the
+totals start from zero at `nativeStart` and at every `nativeUpdateWork`; Kotlin
+notices a slot that went backwards and restarts its measurement instead of
+reporting a negative rate.
 
 ### `nativePollCurrentHash(jbyteArray out)` - 32 bytes
 

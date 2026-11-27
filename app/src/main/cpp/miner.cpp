@@ -146,9 +146,9 @@ void NativeMiner::reset_job_counters() {
         rate_hashes_ = 0;
         rate_ = 0.0;
     }
-    /* A session starts from zero on every worker slot; a new job inside the
-     * session leaves the per-worker totals alone so the panel's deltas stay
-     * continuous. */
+    /* Per-worker totals belong to the job like the job total above: a new job
+     * starts them from zero, and the terminal restarts its rate measurement when
+     * it sees a slot count drop. */
     for (int index = 0; index < kMaxThreads; ++index) {
         thread_hashes_[index].store(0, std::memory_order_relaxed);
     }

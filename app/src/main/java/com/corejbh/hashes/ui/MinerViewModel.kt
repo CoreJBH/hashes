@@ -144,7 +144,14 @@ class MinerViewModel(application: Application) : AndroidViewModel(application) {
     private fun sampleWorkerRates(snapshot: EngineSnapshot) {
         val hashes = snapshot.workerHashes.map { it }
         val now = SystemClock.elapsedRealtime()
-        if (previousWorkerAt == 0L || hashes.size != previousWorkerHashes.size) {
+        /* A new job clears the per-worker totals, so a slot that went backwards
+         * means the counters restarted: measure again from here, never report a
+         * negative or a made-up rate. */
+        val restarted = hashes.size != previousWorkerHashes.size ||
+            hashes.indices.any {
+                it < previousWorkerHashes.size && hashes[it] < previousWorkerHashes[it]
+            }
+        if (previousWorkerAt == 0L || restarted) {
             previousWorkerHashes = hashes
             previousWorkerAt = now
             workerRates = List(hashes.size) { 0.0 }

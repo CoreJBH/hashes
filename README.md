@@ -63,9 +63,11 @@ Package `com.corejbh.hashes`, `minSdk` 26, `targetSdk` 36, `arm64-v8a` only.
 
 The terminal fills the whole screen at any height. The session facts and the hash
 stream take the top, the worker monitor and the event log take the middle, and
-the TURBO line and the two buttons are pinned to the bottom edge; the stream and
-the log stretch to whatever height is left, and a short screen (landscape, a split
-view) switches to a scrolling column instead of cutting anything off.
+the TURBO line and the two buttons are pinned to the bottom edge: they are
+measured before the body, so they keep their height at any font scale. The stream
+and the log take what the fixed panels leave (70/30, each with a floor), so a tall
+phone is filled exactly; when the fixed panels leave less than that, the body
+scrolls instead of cutting anything off. No screen height is compared against.
 
 One palette: `#030604` field, `#00FF66` phosphor, emphasis by inversion, one
 monospace face, scanlines over the whole screen. Nothing is decorated that is not

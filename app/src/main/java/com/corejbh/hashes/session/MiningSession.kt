@@ -38,6 +38,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -508,8 +509,19 @@ class MiningSession private constructor(context: Context) {
         return if (tenths == Int.MIN_VALUE) null else tenths / 10.0
     }
 
+    /**
+     * One atomic step for the whole session.
+     *
+     * The session is written from `Main` (the terminal's buttons, the service's
+     * intents) and from `Default` (the work-event collector, the thermal guard,
+     * the ticker). `_state.value = transform(_state.value)` is a read-modify-write
+     * that loses one of two updates when both sides reach it together, which is
+     * how a share counter or the newest notice used to disappear. `update` retries
+     * the transform against the value it actually replaced, and every transform
+     * here is a pure function of the previous state, so a retry is safe.
+     */
     private fun update(transform: (MiningSessionState) -> MiningSessionState) {
-        _state.value = transform(_state.value)
+        _state.update(transform)
     }
 
     private fun shortNonce(nonce: Long): String =

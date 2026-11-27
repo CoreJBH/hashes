@@ -1,5 +1,6 @@
 package com.corejbh.hashes.engine
 
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -213,5 +214,176 @@ class NativeMiningEngineTest {
         engine.stop()
         assertTrue(binding.stopped)
         assertFalse(engine.snapshot().running)
+    }
+
+    /**
+     * A binding that numbers every reading and reports how many calls were inside
+     * it at once.
+     *
+     * `pollCounters` starts a new generation and `pollCurrentHash`/`pollThreadHashes`
+     * copy that generation into their buffers, so a snapshot whose fields do not
+     * carry the same generation was assembled from two overlapping polls. The
+     * widening loop makes an overlap long enough to happen, not merely possible.
+     */
+    private class PollProbeBinding : NativeMinerBinding {
+        override val available = true
+
+        private val inside = AtomicInteger(0)
+        private val mostInside = AtomicInteger(0)
+        private var generation = 0L
+
+        /** The largest number of calls that were ever in the binding together. */
+        val maxConcurrentCalls: Int get() = mostInside.get()
+
+        private fun enter() {
+            val now = inside.incrementAndGet()
+            mostInside.accumulateAndGet(now) { a, b -> maxOf(a, b) }
+        }
+
+        private fun leave() = inside.decrementAndGet()
+
+        private fun widen() {
+            var spin = 0
+            while (spin < 400) {
+                Thread.onSpinWait()
+                spin += 1
+            }
+        }
+
+        override fun start(
+            headerPrefix: ByteArray,
+            target: ByteArray,
+            nonceStart: Long,
+            turbo: Boolean,
+            dutyHashMicros: Int,
+            dutySleepMicros: Int,
+        ): Boolean = guarded {
+            generation = 1
+            true
+        }
+
+        override fun updateWork(headerPrefix: ByteArray, target: ByteArray, nonceStart: Long): Boolean =
+            guarded { true }
+
+        override fun setTurboMode(turbo: Boolean) = guarded { Unit }
+
+        override fun setThreadCap(threads: Int) = guarded { Unit }
+
+        override fun stop() = guarded { Unit }
+
+        override fun pollCounters(out: LongArray) = guarded {
+            generation += 1
+            widen()
+            out.fill(0)
+            out[NativeMinerBinding.Counter.STATE] = NativeMinerBinding.Counter.STATE_RUNNING
+            out[NativeMinerBinding.Counter.HASHES] = generation
+            out[NativeMinerBinding.Counter.THREADS] = NativeMinerBinding.MAX_THREADS.toLong()
+        }
+
+        override fun pollThreadHashes(out: LongArray): Int = guarded {
+            widen()
+            out.fill(generation)
+            NativeMinerBinding.MAX_THREADS
+        }
+
+        override fun pollCurrentHash(out: ByteArray) = guarded {
+            widen()
+            out.fill((generation % 128).toByte())
+        }
+
+        override fun pollBestHash(out: ByteArray): Boolean = guarded { false }
+
+        override fun pollFoundHash(out: ByteArray): Long = guarded { -1 }
+
+        override fun version(): String = "probe-1"
+
+        private inline fun <T> guarded(block: () -> T): T {
+            enter()
+            try {
+                return block()
+            } finally {
+                leave()
+            }
+        }
+    }
+
+    private fun isOneReading(snapshot: EngineSnapshot): Boolean {
+        val expected = (snapshot.hashesTried % 128).toByte()
+        return snapshot.hashesTried > 0 &&
+            snapshot.currentHash.all { it == expected } &&
+            snapshot.workerHashes.isNotEmpty() &&
+            snapshot.workerHashes.all { it == snapshot.hashesTried }
+    }
+
+    @Test
+    fun `snapshots taken from several threads are one reading each`() {
+        val binding = PollProbeBinding()
+        val engine = NativeMiningEngine(binding)
+        engine.start(work())
+
+        val torn = AtomicInteger(0)
+        val failures = AtomicInteger(0)
+        val threads = (0 until THREADS).map {
+            Thread {
+                try {
+                    repeat(SNAPSHOTS_PER_THREAD) {
+                        if (!isOneReading(engine.snapshot())) torn.incrementAndGet()
+                    }
+                } catch (error: RuntimeException) {
+                    failures.incrementAndGet()
+                }
+            }
+        }
+        threads.forEach(Thread::start)
+        threads.forEach(Thread::join)
+
+        assertEquals(0, failures.get())
+        assertEquals(0, torn.get())
+        assertEquals(1, binding.maxConcurrentCalls)
+    }
+
+    @Test
+    fun `a frame poll and a session poll cannot meet inside the core while a job changes`() {
+        val binding = PollProbeBinding()
+        val engine = NativeMiningEngine(binding)
+        engine.start(work())
+
+        val torn = AtomicInteger(0)
+        val failures = AtomicInteger(0)
+        val writer = Thread {
+            try {
+                repeat(JOB_CHANGES) { round ->
+                    engine.updateWork(work())
+                    engine.setTurboMode(round % 2 == 0)
+                    engine.start(work())
+                    engine.stop()
+                }
+            } catch (error: RuntimeException) {
+                failures.incrementAndGet()
+            }
+        }
+        val readers = (0 until THREADS).map {
+            Thread {
+                try {
+                    repeat(SNAPSHOTS_PER_THREAD) {
+                        if (!isOneReading(engine.snapshot())) torn.incrementAndGet()
+                    }
+                } catch (error: RuntimeException) {
+                    failures.incrementAndGet()
+                }
+            }
+        }
+        (readers + writer).forEach(Thread::start)
+        (readers + writer).forEach(Thread::join)
+
+        assertEquals(0, failures.get())
+        assertEquals(0, torn.get())
+        assertEquals(1, binding.maxConcurrentCalls)
+    }
+
+    private companion object {
+        const val THREADS = 4
+        const val SNAPSHOTS_PER_THREAD = 400
+        const val JOB_CHANGES = 200
     }
 }

@@ -73,21 +73,16 @@ fun BlockPanel(state: MinerUiState, modifier: Modifier = Modifier) {
 fun HashStreamPanel(
     state: MinerUiState,
     modifier: Modifier = Modifier,
-    fixedLines: Int? = null,
 ) {
     Column(modifier.fillMaxWidth()) {
         SectionTitle(
             text = stringResource(R.string.label_live_stream),
             trailing = "[64-HEX]",
         )
-        if (fixedLines != null) {
-            StreamLines(state.stream, fixedLines)
-        } else {
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                val lineHeight = with(LocalDensity.current) { STREAM_LINE_HEIGHT.toDp() }
-                val lines = (maxHeight / lineHeight).toInt().coerceAtLeast(MIN_STREAM_LINES)
-                StreamLines(state.stream, lines)
-            }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val lineHeight = with(LocalDensity.current) { STREAM_LINE_HEIGHT.toDp() }
+            val lines = (maxHeight / lineHeight).toInt().coerceAtLeast(MIN_STREAM_LINES)
+            StreamLines(state.stream, lines)
         }
     }
 }
@@ -218,21 +213,16 @@ private const val MIN_LOG_LINES = 2
 fun EventLogPanel(
     state: MinerUiState,
     modifier: Modifier = Modifier,
-    fixedLines: Int? = null,
 ) {
     Column(modifier.fillMaxWidth()) {
         SectionTitle(
             text = stringResource(R.string.label_event_log),
             trailing = "[${state.notices.size}]",
         )
-        if (fixedLines != null) {
-            LogLines(state.notices, fixedLines)
-        } else {
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                val lineHeight = with(LocalDensity.current) { LOG_LINE_HEIGHT.toDp() }
-                val lines = (maxHeight / lineHeight).toInt().coerceAtLeast(MIN_LOG_LINES)
-                LogLines(state.notices, lines)
-            }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val lineHeight = with(LocalDensity.current) { LOG_LINE_HEIGHT.toDp() }
+            val lines = (maxHeight / lineHeight).toInt().coerceAtLeast(MIN_LOG_LINES)
+            LogLines(state.notices, lines)
         }
     }
 }

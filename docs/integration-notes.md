@@ -114,6 +114,52 @@ It is the only contract change; `NativeBridgeContractTest` compares the
 declarations with `jni_bridge.cpp` and caught nothing, and the C test checks that
 the per-worker slots add up to the job total.
 
+## The cross-review follow-ups: one reading, one layout, one update
+
+The follow-up review of `9f8e235` raised two Medium findings and one Low; all
+three are closed on `main`.
+
+- **One reading at a time (`NativeMiningEngine`).** The screen polls the engine at
+  30 fps on `Main` while the session's housekeeping loop polls it once a second on
+  `Dispatchers.Default`. Both filled the same counter, worker, digest and
+  found-share buffers, and the same rate smoother, so two overlapping polls could
+  assemble a snapshot from two different readings, or a rate from a sample the
+  caller never took. One `lock` now covers every method that touches those buffers
+  or calls into the core: `start`, `updateWork`, `setTurboMode`, `setThreadCap`,
+  `stop`, `close`, `snapshot` and `takeFoundShare`. The native calls never call
+  back into Kotlin, so the sections cannot deadlock; the longest is `stop`, which
+  waits for the core's own join. `NativeMiningEngineTest` gained two contention
+  tests: a probe binding numbers every poll and counts how many calls are inside
+  it at once; four threads take 400 snapshots each while a fifth replaces the job,
+  every snapshot must carry a single generation, and no two calls may be inside
+  the binding together. Both tests fail when the `snapshot` lock is replaced with
+  a fresh object, and pass with it.
+- **The controls can no longer be squeezed out (`MinerScreen`).** The layout used
+  to decide `maxHeight >= 600dp` once and, on the "full" side, put the buttons in
+  the same column as the weighted panels; a 600–700 dp screen at a 1.2x font
+  scale made the fixed rows taller than the screen and left the buttons, the TURBO
+  line and the pool button at 0 dp. The screen is now two parts: the controls are
+  the last child of the outer column and are measured first at their natural
+  height, and the body above them takes everything else through
+  `weight(1f, fill = true)`. The body is a single scrolling column; the two fixed
+  blocks report their laid-out height, and the stream and the log split what is
+  left 70/30 with a floor (66 dp and 50 dp). A tall screen is therefore filled
+  exactly, and a short screen, a split view or a large font scrolls instead of
+  clipping. No screen height is compared against. `TerminalLayoutTest` covers the
+  split, the exact fill and the floors.
+- **No lost state (`MiningSession`).** `_state.value = transform(_state.value)` is
+  a read-modify-write, and the session is written from `Main` (the buttons, the
+  service intents) and from `Default` (work events, the thermal guard, the
+  ticker); one of two simultaneous updates could disappear, which is how a share
+  counter or the newest notice went missing. The single `update` helper now calls
+  `MutableStateFlow.update`, and every transform is a pure function of the
+  previous state, so a retry is safe.
+
+Still open, not touched by this pass: the session's own `sessionExtranonce1`,
+`pendingJob`, `extranonce2Counter` and `engineRunning` are plain fields written
+from both dispatchers. The published state is now consistent; those fields are
+not atomic, and the same class of fix would apply to them.
+
 ## What has not been verified
 
 - **The native tests did not execute.** This environment has no host C library,
@@ -138,9 +184,10 @@ the per-worker slots add up to the job total.
   Android 15+ `dataSync` timeout compile and pass lint, but no device has been left
   on the home screen with a session running; that is the first thing to try on the
   next real-device pass.
-- **The weighted layout is not rendered here.** It is unit-testable only as far as
-  the worker/sparkline formatting goes; the two-panel weight split and the compact
-  scrolling fallback need a device or a preview to confirm.
+- **The layout is not rendered here.** The height split is unit tested
+  (`TerminalLayoutTest`), but no device or preview has shown the pinned controls
+  at a 1.2x font scale on a 600 dp screen; that is a check for the next
+  real-device pass.
 
 ## Things left for Phase 4
 

@@ -28,6 +28,6 @@ PRIVACY
 No analytics, no accounts, no Google Play Services. The only network connection is the pool you chose. The app is open source and builds from source without proprietary dependencies.
 
 REQUIREMENTS
-Android 8.0 or newer. An arm64 device gets the native ARMv8 SHA-256 path; anything else runs the slower Kotlin engine.
+Android 8.0 or newer on a 64-bit ARM device (arm64-v8a). The app ships that one ABI only, because its hash engine is native arm64 code, so a 32-bit ARM or an x86 device cannot install it. On a supported device whose native library fails to load, the app still runs on its slower Kotlin engine.
 
 Mining on a phone is a hobby, not a business. Expect nothing, enjoy the terminal.

@@ -4,9 +4,10 @@ package com.corejbh.hashes.engine
  * The bridge to `libhashes.so`, exactly as the bridge contract defines it:
  * `docs/native-bridge-contract.md`.
  *
- * Nine methods, no per-hash calls. Kotlin hands over one job, flips the mode,
- * and then reads counters and hashes about thirty times a second. Buffers are
- * reused between calls: the native side copies what it needs before returning.
+ * Ten methods — the nine of the contract plus [nativeSetThreadCap] — and no
+ * per-hash calls. Kotlin hands over one job, flips the mode, and then reads
+ * counters and hashes about thirty times a second. Buffers are reused between
+ * calls: the native side copies what it needs before returning.
  *
  * A load failure is not fatal. [available] goes false, the rest of the app can
  * fall back to the Kotlin engine, and nothing is called into a library that is

@@ -57,8 +57,13 @@ the native test run on a machine that can run it.
 
 ## Not verified here
 
-There is no host C compiler, no qemu and no arm64 hardware in this environment, so
-no C assertion has been observed to pass. What was done instead:
+There was no system C compiler, no qemu and no arm64 hardware in the environment
+this review ran in, so no C assertion was observed to pass at review time. Since
+then the host suite has been built and run, using a cross-compiler as the host C
+compiler for the portable path (`zig cc -target x86_64-linux-gnu`):
+`hashes-native-test` passes 21 checks and `hashes-miner-test` 23, with no
+failures. The target-equality case added with them fails as it should when the
+comparison is put back to a strict `<`. What was done at review time instead:
 
 - the whole native core and both native test programs compile for `arm64-v8a`
   with `-Wall -Wextra -Werror` against NDK 30.0.16248370 and link statically;
@@ -69,5 +74,5 @@ no C assertion has been observed to pass. What was done instead:
   target arithmetic) is covered by the JVM suite against real mainnet headers.
 
 `scripts/run-native-tests.sh` (host) and `scripts/run-native-tests-aarch64.sh`
-(qemu) remain the way to execute the C vectors; run both before the Phase 4
-release.
+(qemu) remain the way to execute the C vectors; the host run above was the first
+of the two, so the ARMv8 half still has to run before the Phase 4 release.

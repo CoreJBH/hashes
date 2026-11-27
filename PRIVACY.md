@@ -29,8 +29,11 @@ no server of its own, and it never asks for a private key or a seed phrase.
 | Permission | Why |
 | --- | --- |
 | `INTERNET` | The Stratum connection to the pool you selected |
-| `ACCESS_NETWORK_STATE` | To distinguish "no network" from "pool refused" in the status line |
 | `CAMERA` | Only while the QR scanner is open, to read a payout address from a QR code; never in the background, and no image is stored or sent |
+
+Those are the only two. The app does not ask for `ACCESS_NETWORK_STATE`: it has
+no use for the network state, because a pool that is unreachable simply fails the
+connection and the status line reports that failure.
 
 The manifest declares the camera as not required, so the app installs on a device
 without one and the address can still be typed or pasted.

@@ -169,6 +169,45 @@ static void test_difficulty_one(void) {
           difficulty);
 }
 
+/* The comparison is "at or below" (bitcoin's own check is cmp <= 0), so a hash
+ * exactly equal to the target is a valid share. Hashing cannot reach that case by
+ * chance (2^-256), so the equality is exercised directly on the comparison. */
+static void test_target_equality(void) {
+    uint8_t target[HASHES_TARGET_SIZE];
+    uint8_t equal[HASHES_SHA256_DIGEST_SIZE];
+
+    /* A real difficulty-1 target, with a digest built to sit exactly on it. The
+     * leading digits of the hash are the last digest bytes, so the digest is the
+     * reversed target. */
+    target_from_bits(0x1d00ffffu, target);
+    for (int i = 0; i < HASHES_SHA256_DIGEST_SIZE; ++i) {
+        equal[i] = target[HASHES_SHA256_DIGEST_SIZE - 1 - i];
+    }
+    CHECK(hashes_hash_meets_target(equal, target) == 1,
+          "a hash exactly equal to the target is not counted as a meet");
+
+    /* The same construction on a target whose last digit is not zero, so both
+     * neighbours can be checked with a one-digit step: the last digest byte is
+     * the least significant digit of the hash. */
+    for (int i = 0; i < HASHES_TARGET_SIZE; ++i) {
+        target[i] = 0x11;
+    }
+    for (int i = 0; i < HASHES_SHA256_DIGEST_SIZE; ++i) {
+        equal[i] = target[HASHES_SHA256_DIGEST_SIZE - 1 - i];
+    }
+
+    uint8_t neighbour[HASHES_SHA256_DIGEST_SIZE];
+    memcpy(neighbour, equal, sizeof(neighbour));
+    neighbour[0] = (uint8_t)(equal[0] + 1);
+    CHECK(hashes_hash_meets_target(neighbour, target) == 0,
+          "a hash one digit above the target is counted as a meet");
+
+    memcpy(neighbour, equal, sizeof(neighbour));
+    neighbour[0] = (uint8_t)(equal[0] - 1);
+    CHECK(hashes_hash_meets_target(neighbour, target) == 1,
+          "a hash one digit below the target is not counted as a meet");
+}
+
 /* A job whose target is met should be reported by the nonce walk; a job whose
  * target is impossible should not. This exercises the comparison and the range. */
 static void test_nonce_walk(void) {
@@ -252,6 +291,7 @@ int main(void) {
     test_sha256_vectors();
     test_block_headers();
     test_difficulty_one();
+    test_target_equality();
     test_nonce_walk();
 #if defined(HASHES_HAVE_ARM64_SHA2)
     test_arm_crypto_matches_portable();

@@ -49,23 +49,52 @@ class SocketStratumTransport(
 
     override fun connect() {
         val raw = Socket()
-        raw.tcpNoDelay = true
-        raw.keepAlive = true
-        raw.connect(InetSocketAddress(endpoint.host, endpoint.port), connectTimeoutMs)
+        var opened: Socket? = null
+        try {
+            raw.tcpNoDelay = true
+            raw.keepAlive = true
+            raw.connect(InetSocketAddress(endpoint.host, endpoint.port), connectTimeoutMs)
 
-        val connected: Socket = if (endpoint.secure) {
-            val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
-            val ssl = factory.createSocket(raw, endpoint.host, endpoint.port, true) as SSLSocket
-            ssl.sslParameters = ssl.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
-            ssl.startHandshake()
-            ssl
-        } else {
-            raw
+            val connected: Socket = if (endpoint.secure) {
+                val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
+                val ssl = factory.createSocket(raw, endpoint.host, endpoint.port, true) as SSLSocket
+                opened = ssl
+                ssl.sslParameters =
+                    ssl.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
+                // The handshake reads before it writes, so the read timeout has to
+                // be in place first: a host that accepts the TCP connection and
+                // then never answers the ClientHello would otherwise block this
+                // thread for ever instead of failing after connectTimeoutMs.
+                ssl.soTimeout = connectTimeoutMs
+                ssl.startHandshake()
+                ssl
+            } else {
+                opened = raw
+                raw
+            }
+            connected.soTimeout = connectTimeoutMs
+            socket = connected
+            reader = BufferedReader(InputStreamReader(connected.getInputStream(), Charsets.UTF_8))
+            writer = BufferedWriter(OutputStreamWriter(connected.getOutputStream(), Charsets.UTF_8))
+        } catch (failure: Throwable) {
+            // A handshake that fails and does not close leaves a half-open socket
+            // behind and keeps the transport unusable, so release what was opened
+            // here and report the failure to the caller.
+            socket = null
+            reader = null
+            writer = null
+            try {
+                opened?.close()
+            } catch (_: IOException) {
+                // Nothing left to release on that socket.
+            }
+            try {
+                raw.close()
+            } catch (_: IOException) {
+                // Closing the underlying socket twice is harmless.
+            }
+            throw failure
         }
-        connected.soTimeout = connectTimeoutMs
-        socket = connected
-        reader = BufferedReader(InputStreamReader(connected.getInputStream(), Charsets.UTF_8))
-        writer = BufferedWriter(OutputStreamWriter(connected.getOutputStream(), Charsets.UTF_8))
     }
 
     override fun readLine(): String? = reader?.readLine()

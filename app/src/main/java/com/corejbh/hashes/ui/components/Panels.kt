@@ -3,6 +3,7 @@ package com.corejbh.hashes.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +13,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -34,10 +36,11 @@ fun BlockPanel(state: MinerUiState, modifier: Modifier = Modifier) {
     } else {
         Format.abbreviate(state.payoutAddress, 12, 8)
     }
+    val difficulty = state.networkDifficulty
     val target = when {
         state.networkBits == null -> stringResource(R.string.label_unset)
-        state.networkDifficulty != null ->
-            "0x${state.networkBits} / DIFF ${Format.difficulty(state.networkDifficulty)}"
+        difficulty != null ->
+            "0x${state.networkBits} / DIFF ${Format.difficulty(difficulty)}"
         else -> "0x${state.networkBits}"
     }
     val nonce = Format.nonce(state.snapshot.nonce)
@@ -59,23 +62,44 @@ fun BlockPanel(state: MinerUiState, modifier: Modifier = Modifier) {
     }
 }
 
-/** The scrolling `LIVE_HASH_STREAM`: newest hash first, near misses inverted. */
+/**
+ * The scrolling `LIVE_HASH_STREAM`: newest hash first, near misses inverted.
+ *
+ * The panel takes whatever height the screen gives it and draws as many lines as
+ * fit there, so the same composable fills the space on a tall phone and shrinks
+ * to a few lines on a short one without either a fixed row count or a hard cut.
+ */
 @Composable
-fun HashStreamPanel(state: MinerUiState, modifier: Modifier = Modifier) {
+fun HashStreamPanel(
+    state: MinerUiState,
+    modifier: Modifier = Modifier,
+    fixedLines: Int? = null,
+) {
     Column(modifier.fillMaxWidth()) {
         SectionTitle(
             text = stringResource(R.string.label_live_stream),
             trailing = "[64-HEX]",
         )
-        if (state.stream.isEmpty()) {
-            repeat(HashStream.DEFAULT_CAPACITY) {
-                StreamLine(hex = ZERO_LINE, highlight = false, dim = true)
-            }
+        if (fixedLines != null) {
+            StreamLines(state.stream, fixedLines)
         } else {
-            for (sample in state.stream) {
-                StreamLine(hex = sample.hex, highlight = sample.worthHighlighting, dim = false)
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                val lineHeight = with(LocalDensity.current) { STREAM_LINE_HEIGHT.toDp() }
+                val lines = (maxHeight / lineHeight).toInt().coerceAtLeast(MIN_STREAM_LINES)
+                StreamLines(state.stream, lines)
             }
-            repeat((HashStream.DEFAULT_CAPACITY - state.stream.size).coerceAtLeast(0)) {
+        }
+    }
+}
+
+@Composable
+private fun StreamLines(samples: List<HashStream.Sample>, lines: Int) {
+    Column(Modifier.fillMaxWidth()) {
+        for (index in 0 until lines) {
+            val sample = samples.getOrNull(index)
+            if (sample != null) {
+                StreamLine(hex = sample.hex, highlight = sample.worthHighlighting, dim = false)
+            } else {
                 StreamLine(hex = ZERO_LINE, highlight = false, dim = true)
             }
         }
@@ -97,7 +121,12 @@ private fun StreamLine(hex: String, highlight: Boolean, dim: Boolean) {
     ) {
         Text(
             text = hex,
-            style = TerminalTextStyle.copy(fontSize = 8.sp, letterSpacing = 0.sp, color = color),
+            style = TerminalTextStyle.copy(
+                fontSize = 8.sp,
+                lineHeight = STREAM_LINE_HEIGHT,
+                letterSpacing = 0.sp,
+                color = color,
+            ),
             maxLines = 1,
             modifier = Modifier.padding(horizontal = 1.dp),
         )
@@ -128,11 +157,12 @@ private fun describe(record: BestShareRecord?): String {
 /** HASHRATE, TRIED, ODDS and STATUS in two terminal columns. */
 @Composable
 fun TelemetryPanel(state: MinerUiState, modifier: Modifier = Modifier) {
-    val odds = if (state.networkDifficulty == null) {
+    val difficulty = state.networkDifficulty
+    val odds = if (difficulty == null) {
         stringResource(R.string.label_unset)
     } else {
         "1 IN " + Format.hashes(
-            com.corejbh.hashes.network.Target.expectedHashes(state.networkDifficulty)
+            com.corejbh.hashes.network.Target.expectedHashes(difficulty)
         ) + " (" + Format.duration(state.expectedSeconds) + ")"
     }
     Column(modifier.fillMaxWidth()) {
@@ -171,23 +201,69 @@ private fun statusLine(state: MinerUiState): String {
 
 private const val ZERO_LINE = "0000000000000000000000000000000000000000000000000000000000000000"
 
-/** The last few terminal notices, oldest last. */
+/** A hash line is drawn at 8 sp; the reader measures the panel in these. */
+val STREAM_LINE_HEIGHT = 11.sp
+private const val MIN_STREAM_LINES = 4
+
+/** One event-log line, including the `> ` prompt. */
+val LOG_LINE_HEIGHT = 13.sp
+private const val MIN_LOG_LINES = 2
+
+/**
+ * The event log: the last notices, newest first, filling the space the layout
+ * gives it. Lines past the newest notice carry the prompt alone, so the panel
+ * reads as a terminal with an empty tail rather than a hole in the screen.
+ */
 @Composable
-fun NoticePanel(state: MinerUiState, modifier: Modifier = Modifier) {
+fun EventLogPanel(
+    state: MinerUiState,
+    modifier: Modifier = Modifier,
+    fixedLines: Int? = null,
+) {
     Column(modifier.fillMaxWidth()) {
-        if (state.notices.isEmpty()) {
-            Text(
-                text = "> AWAITING COMMAND",
-                style = TerminalTextStyle.copy(color = Crt.PhosphorFaint, fontSize = 10.sp),
-            )
+        SectionTitle(
+            text = stringResource(R.string.label_event_log),
+            trailing = "[${state.notices.size}]",
+        )
+        if (fixedLines != null) {
+            LogLines(state.notices, fixedLines)
         } else {
-            for (notice in state.notices) {
-                Text(
-                    text = "> $notice",
-                    style = TerminalTextStyle.copy(color = Crt.PhosphorDim, fontSize = 10.sp),
-                    maxLines = 2,
-                )
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                val lineHeight = with(LocalDensity.current) { LOG_LINE_HEIGHT.toDp() }
+                val lines = (maxHeight / lineHeight).toInt().coerceAtLeast(MIN_LOG_LINES)
+                LogLines(state.notices, lines)
             }
         }
     }
+}
+
+@Composable
+private fun LogLines(notices: List<String>, lines: Int) {
+    Column(Modifier.fillMaxWidth()) {
+        if (notices.isEmpty()) {
+            LogLine("> " + stringResource(R.string.label_awaiting_command), dim = true)
+        } else {
+            for (index in 0 until lines) {
+                val notice = notices.getOrNull(index)
+                if (notice != null) {
+                    LogLine("> $notice", dim = false)
+                } else {
+                    LogLine(">", dim = true)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogLine(text: String, dim: Boolean) {
+    Text(
+        text = text,
+        style = TerminalTextStyle.copy(
+            color = if (dim) Crt.PhosphorFaint else Crt.PhosphorDim,
+            fontSize = 10.sp,
+            lineHeight = LOG_LINE_HEIGHT,
+        ),
+        maxLines = 1,
+    )
 }

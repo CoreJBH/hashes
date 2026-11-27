@@ -38,7 +38,11 @@ class HashStream(private val capacity: Int = DEFAULT_CAPACITY) {
     fun clear() = samples.clear()
 
     companion object {
-        const val DEFAULT_CAPACITY = 10
+        /**
+         * Kept: the live stream panel draws as many lines as the screen has room
+         * for, so the buffer holds a full panel on a tall phone.
+         */
+        const val DEFAULT_CAPACITY = 24
         const val HIGHLIGHT_ZEROS = 4
     }
 }

@@ -13,6 +13,13 @@
     <string name="label_nonce">NONCE_COUNTER</string>
     <string name="label_sha_output">DOUBLE_SHA256_OUTPUT</string>
     <string name="label_live_stream">LIVE_HASH_STREAM</string>
+    <string name="label_event_log">EVENT_LOG</string>
+    <string name="label_awaiting_command">AWAITING COMMAND</string>
+    <string name="label_workers">WORKERS</string>
+    <string name="label_workers_idle">NO WORKERS RUNNING</string>
+    <string name="label_rate_graph">HASHRATE</string>
+    <string name="label_temp_graph">TEMP</string>
+    <string name="unit_hashes_per_second">H/s</string>
     <string name="label_session_best">SESSION_BEST_SHARE</string>
     <string name="label_all_time_best">ALL_TIME_BEST</string>
     <string name="label_hashrate">HASHRATE</string>
@@ -46,4 +53,8 @@
     <string name="settings_note">THE POOL PAYS THE ADDRESS IN THE COINBASE OF ANY BLOCK FOUND. NO KEY, NO SEED, NO ACCOUNT.</string>
     <string name="settings_engine_native">ENGINE: NATIVE (ARMV8 SHA2-256)</string>
     <string name="settings_engine_fallback">ENGINE: KOTLIN-FALLBACK (NO NATIVE LIBRARY)</string>
+
+    <string name="notification_channel">Mining session</string>
+    <string name="notification_channel_description">Live hash rate while a mining session runs in the background.</string>
+    <string name="notification_stop">STOP</string>
 </resources>

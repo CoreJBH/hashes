@@ -107,10 +107,11 @@ class FallbackHashEngine(
             smoothedRate
         }
         val best = synchronized(bestLock) { bestHash?.copyOf() }
+        val hashTotal = hashes
         return EngineSnapshot(
             running = running,
             turbo = turbo,
-            hashesTried = hashes,
+            hashesTried = hashTotal,
             hashRate = rate,
             nonce = nonce,
             currentHash = synchronized(this) { hotHash.copyOf() },
@@ -118,6 +119,8 @@ class FallbackHashEngine(
             bestHash = best,
             hardwareSha256 = false,
             engineName = name,
+            // One thread, so the panel has one slot and it is the whole total.
+            workerHashes = if (running) longArrayOf(hashTotal) else LongArray(0),
         )
     }
 

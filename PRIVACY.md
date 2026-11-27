@@ -30,20 +30,35 @@ no server of its own, and it never asks for a private key or a seed phrase.
 | --- | --- |
 | `INTERNET` | The Stratum connection to the pool you selected |
 | `CAMERA` | Only while the QR scanner is open, to read a payout address from a QR code; never in the background, and no image is stored or sent |
+| `FOREGROUND_SERVICE` | A running session keeps going while the app is not on screen; Android only allows that as a foreground service |
+| `FOREGROUND_SERVICE_DATA_SYNC` | The type that session runs under: an ongoing data connection, which is exactly what the pool link is. It is a normal type, not a special-use declaration |
+| `POST_NOTIFICATIONS` | The status-bar entry a foreground service must show: the live hash rate, the mode and a `STOP` action (Android 13+, asked at the first start) |
 
-Those are the only two. The app does not ask for `ACCESS_NETWORK_STATE`: it has
-no use for the network state, because a pool that is unreachable simply fails the
-connection and the status line reports that failure.
+The app does not ask for `ACCESS_NETWORK_STATE`: it has no use for the network
+state, because a pool that is unreachable simply fails the connection and the
+status line reports that failure.
 
 The manifest declares the camera as not required, so the app installs on a device
 without one and the address can still be typed or pasted.
 
 ## Background
 
-Nothing runs in the background. The session starts when you press
-`[ START / STOP MINER ]`, keeps the screen awake while it runs, and stops when the
-app leaves the screen; no foreground service, no notification, no work behind your
-back.
+Mining continues when you leave the terminal, and the notification in the status
+bar is how you can tell. The session runs as a `dataSync` foreground service: the
+notification shows `COOL` or `TURBO`, the pool link, the live hash rate and the
+block being hashed, and it carries a `STOP` action that ends the session at once.
+Nothing else runs in the background, there is no scheduled work, no wake lock and
+no sensor.
+
+It stops when you press `[ STOP / START MINER ]`, when you press `STOP` in the
+notification, or when you swipe the app out of the recent-tasks list. If Android
+itself ends the foreground service - for example the platform's daily budget for
+`dataSync` services - the session stops with it rather than lingering half-alive,
+and nothing reconnects on its own until you start it again.
+
+Declining the notification permission on Android 13+ does not stop the service:
+the session still runs, the status-bar entry is simply not drawn, and the running
+service remains visible in the system's own task manager.
 
 ## Removing your data
 

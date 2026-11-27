@@ -1,5 +1,5 @@
 /*
- * JNI surface of the hash engine: the nine methods of the bridge contract
+ * JNI surface of the hash engine: the methods of the bridge contract
  * (docs/native-bridge-contract.md), exported under the names the Kotlin object
  * com.corejbh.hashes.engine.NativeMiner resolves.
  *
@@ -102,6 +102,22 @@ Java_com_corejbh_hashes_engine_NativeMiner_nativePollCounters(JNIEnv *env, jobje
     miner().fill_counters(counters);
     env->SetLongArrayRegion(out, 0, hashes::NativeMiner::kCounterSlots,
                             reinterpret_cast<const jlong *>(counters));
+}
+
+/* Per-worker cumulative hashes for the terminal's worker panel. Returns the
+ * number of slots filled (the worker count of the current mode); the caller's
+ * array is kMaxThreads long, and the rest of it is written as zero. */
+JNIEXPORT jint JNICALL
+Java_com_corejbh_hashes_engine_NativeMiner_nativePollThreadHashes(JNIEnv *env, jobject,
+                                                                  jlongArray out) {
+    if (out == nullptr || env->GetArrayLength(out) < hashes::NativeMiner::kMaxThreads) {
+        return 0;
+    }
+    int64_t counts[hashes::NativeMiner::kMaxThreads];
+    int workers = miner().fill_thread_hashes(counts);
+    env->SetLongArrayRegion(out, 0, hashes::NativeMiner::kMaxThreads,
+                            reinterpret_cast<const jlong *>(counts));
+    return workers;
 }
 
 JNIEXPORT void JNICALL

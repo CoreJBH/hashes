@@ -53,12 +53,19 @@ Package `com.corejbh.hashes`, `minSdk` 26, `targetSdk` 36, `arm64-v8a` only.
 | It does | It never does |
 | --- | --- |
 | Hash real mainnet block headers from a solo pool, with the nonce, digest and hash stream the device actually produced | Simulate mining or show a number it did not compute |
+| Keep the session running while you use another app, as a foreground service with the live rate in the status bar and a `STOP` action there | Keep hashing after you stop it - the button, the notification or a swipe out of the recent tasks all end the session |
 | Validate the payout address before a socket opens: Base58Check `1…`/`3…`, Bech32 `bc1q…`, Bech32m `bc1p…`, checksum verified, testnet refused | Ask for a private key, a seed phrase, an account or an email |
 | Scan a payout address from a QR code with CameraX + ZXing, with no Play Services and no ML Kit | Promise a block; the odds line is the honest expected time at the measured rate |
-| Submit a found share against the job it came from, and never reuse a stale job after a reconnect | Mine in the background or keep hashing with the screen off |
+| Submit a found share against the job it came from, and never reuse a stale job after a reconnect | Report a worker rate or a bar the engine did not produce |
 | Step TURBO down when the phone gets hot, and say so on screen | Use the debug key as a release fallback, or ship an unsigned release without being told to |
 
 ## The terminal
+
+The terminal fills the whole screen at any height. The session facts and the hash
+stream take the top, the worker monitor and the event log take the middle, and
+the TURBO line and the two buttons are pinned to the bottom edge; the stream and
+the log stretch to whatever height is left, and a short screen (landscape, a split
+view) switches to a scrolling column instead of cutting anything off.
 
 One palette: `#030604` field, `#00FF66` phosphor, emphasis by inversion, one
 monospace face, scanlines over the whole screen. Nothing is decorated that is not
@@ -68,12 +75,19 @@ information.
   phosphor, then the terminal.
 - **Block panel**: `BLOCK_HEIGHT`, `PREV_HASH`, `PAYOUT_ADDR`, `NET_TARGET` for the
   job being hashed, plus the network difficulty and the odds.
-- **Live hash stream**: the last ten digests, a near miss (four or more leading
-  zeros) inverted so it is visible at a glance.
+- **Live hash stream**: the newest digests, a near miss (four or more leading
+  zeros) inverted so it is visible at a glance, drawn down to the last line the
+  panel has room for.
 - **Best shares**: `SESSION_BEST_SHARE` for this run and `ALL_TIME_BEST` across
   restarts.
 - **Telemetry**: hashrate, tries, nonce counter, thread count, temperature, and the
   engine in use (`NATIVE (ARMV8 SHA2-256)` or `KOTLIN-FALLBACK`).
+- **`WORKERS`**: an `htop`-style bar per worker thread from the core's own
+  per-worker counters, with `TURBO 7T` or `TURBO 4T / CAP 7T` when the thermal
+  guard has capped the set, and live `HASHRATE` and `TEMP` sparklines over the last
+  24 seconds.
+- **`EVENT_LOG`**: the session's notices (jobs, shares, link changes, thermal
+  steps), newest first, filling the height the layout gives it.
 - **`POOL & PAYOUT`**: pool presets, a custom `stratum+ssl://host:port` endpoint,
   and `PAYOUT_TARGET>` with `[ PASTE ]` and `[ SCAN_QR ]`.
 
@@ -93,7 +107,9 @@ information.
 | Network | `network/` | Stratum V1 over TLS or TCP, backoff, coinbase/merkle/header assembly, compact target arithmetic, BIP34 height |
 | Addresses | `crypto/` | SHA-256 (Kotlin), Bech32/Bech32m, Base58Check, BIP-21 URI extraction |
 | Thermal | `thermal/` | `ThermalMonitor` reads the OS, `ThermalPolicy` decides, `ThermalGuard` applies |
-| UI | `ui/` | Compose terminal, splash, settings sheet, address field, hash stream, QR scanner |
+| Session | `session/` | `MiningSession`: the engine, the pool link, the thermal guard and the one-second loop, process-wide and screen-independent |
+| Service | `service/` | `MinerForegroundService`: a `dataSync` foreground service, its notification and its `STOP` action |
+| UI | `ui/` | Compose terminal, splash, settings sheet, address field, hash stream, worker monitor, QR scanner |
 
 **A SIGILL is impossible by construction.** The extension flag is a per-source
 compile option on one translation unit. Every other translation unit is built for
@@ -120,6 +136,7 @@ current digest and the best digest.
 | `nativeSetThreadCap(threads)` | Cap how many workers TURBO may use (the MODERATE thermal step) |
 | `nativeStop()` | Stop and join; idempotent |
 | `nativePollCounters(out[8])` | state, hashes, nonce, threads, hash rate, best zero nibbles, flags, reserved |
+| `nativePollThreadHashes(out[8])` | Cumulative hashes per worker slot, and how many slots the mode runs |
 | `nativePollCurrentHash(out)` | The most recent digest, internal order |
 | `nativePollBestHash(out)` | `Boolean`: best digest of the job written, or none yet |
 | `nativePollFoundHash(out)` | `Long`: nonce of the oldest found hash, or -1 |
@@ -144,6 +161,26 @@ job rather than repeating the space.
 - API 26-28 have no thermal status API, so the same two thresholds are applied to
   the battery temperature from the sticky battery broadcast.
 
+## Leaving the screen
+
+The session belongs to the process, not to the activity. Pressing
+`[ START / STOP MINER ]` starts `MINERFOREGROUNDSERVICE`, a `dataSync` foreground
+service that holds the pool socket and the worker set; the terminal only reads the
+session and turns it into frames. Going back to the home screen or into another
+app pauses the 30 fps polling and nothing else - the hash rate keeps counting,
+found shares keep being submitted, and the status-bar notification refreshes every
+second with the mode, the link state, the live rate and the height.
+
+It ends in exactly three places: the button, the notification's `STOP`, and a
+swipe of the app out of the recent tasks (`onTaskRemoved`). All three stop the
+workers, close the socket and remove the notification. `START_NOT_STICKY` means
+the system never brings a session back on its own, and the Android 15+ daily
+budget for `dataSync` services ends it visibly rather than invisibly.
+
+On Android 13+ the app asks for `POST_NOTIFICATIONS` the first time a session
+starts. A refusal does not stop the service - the shade simply stays empty and
+the running service remains listed in the system's task manager.
+
 ## Design rules the code keeps
 
 - **English only, everywhere**, and the brand string appears nowhere except
@@ -154,9 +191,12 @@ job rather than repeating the space.
 - **Mainnet only.** Testnet and regtest addresses are refused before a socket
   opens.
 - **Honest numbers.** Every hash, nonce and share on screen was produced by this
-  device; the odds line is difficulty × 2³² ÷ the measured rate.
-- **Foreground only.** When the screen goes away the session closes instead of
-  hashing behind your back; the screen is kept awake only while mining.
+  device; the odds line is difficulty × 2³² ÷ the measured rate, and each worker
+  bar is a difference of that worker's own counter.
+- **Visible in the background, or not at all.** A session that outlives the screen
+  runs as a `dataSync` foreground service with its live rate in the status bar and
+  a `STOP` action there; stopping it - button, notification or a swipe out of the
+  recent tasks - ends it and removes the notification.
 
 ## Build
 
@@ -190,7 +230,7 @@ directories so no build-host path reaches an object file.
 ## Tests
 
 ```sh
-./gradlew :app:testDebugUnitTest     # 149 JVM tests
+./gradlew :app:testDebugUnitTest     # 173 JVM tests
 ./gradlew :app:lintDebug             # no errors; warnings are dependency versions
 python3 scripts/verify-english.py    # English only, brand only in the package name
 ```

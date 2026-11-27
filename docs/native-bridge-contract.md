@@ -27,6 +27,7 @@ Java_com_corejbh_hashes_engine_NativeMiner_nativeSetTurboMode
 Java_com_corejbh_hashes_engine_NativeMiner_nativeSetThreadCap
 Java_com_corejbh_hashes_engine_NativeMiner_nativeStop
 Java_com_corejbh_hashes_engine_NativeMiner_nativePollCounters
+Java_com_corejbh_hashes_engine_NativeMiner_nativePollThreadHashes
 Java_com_corejbh_hashes_engine_NativeMiner_nativePollCurrentHash
 Java_com_corejbh_hashes_engine_NativeMiner_nativePollBestHash
 Java_com_corejbh_hashes_engine_NativeMiner_nativePollFoundHash
@@ -105,6 +106,19 @@ Kotlin polls about 30 times per second. Each poll must be a consistent read of a
 | 5 | best leading zero nibbles this job |
 | 6 | flags, bit 0 = ARMv8 SHA-256 hardware path active |
 | 7 | reserved, write 0 |
+
+### `nativePollThreadHashes(jlongArray out)` - length 8, returns `jint`
+
+Cumulative hashes per worker slot, one slot per worker of the current mode, and
+the number of slots that carry a worker. Slots past that count must be written as
+zero, so a lower thread cap never leaves an old total behind; the caller's array
+is always eight long.
+
+Kotlin differences two reads of this array to draw the terminal's per-worker bars
+and never derives one worker's rate from another's, so the counter must be
+per-thread and must count the same hashes the total does. Totals accumulate across
+jobs within a session (a new job does not clear them) and start from zero when
+`nativeStart` begins a session.
 
 ### `nativePollCurrentHash(jbyteArray out)` - 32 bytes
 

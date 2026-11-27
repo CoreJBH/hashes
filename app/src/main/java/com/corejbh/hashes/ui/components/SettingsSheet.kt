@@ -203,7 +203,7 @@ fun SettingsSheet(
 
             Text(
                 text = stringResource(
-                    if (state.snapshot.engineName == "native") {
+                    if (state.engineNative) {
                         R.string.settings_engine_native
                     } else {
                         R.string.settings_engine_fallback

@@ -5,11 +5,12 @@ It hashes real mainnet block headers from a solo pool, shows every hash as it is
 WHAT IT DOES NOT DO
 - It does not simulate mining. The nonce counter, the double SHA-256 output and the hash stream are the values the device is actually producing.
 - It does not promise a block. Solo mining is a lottery: the odds line on screen is the honest expected time at your current hash rate.
-- It does not run in the background, and it does not keep mining with the screen off.
+- It does not keep mining after you stop it. Leaving the app keeps the session running, but the button, the STOP action in the status-bar notification, and a swipe out of the recent tasks all end it.
 
 HOW IT MINES
 - Assembled from a Stratum V1 solo pool: subscribe, authorize, notify, set difficulty and submit.
 - TLS first. The payout address travels in the login line, so a pool that offers Stratum over TLS is dialled over TLS with certificate and host name verification.
+- Mining continues while you are in another app, as a foreground service with the live hash rate in the status bar.
 - COOL is the default: a short hash window per screen frame keeps the CPU share small and the phone cool, while the terminal still updates at 30 frames per second.
 - TURBO uses the ARMv8 SHA-256 instructions and more than one worker thread, and steps back automatically when the device gets hot.
 - Found shares are submitted with the job they belong to. A reconnect never reuses a stale job and no share is ever invented to look busy.
@@ -19,6 +20,9 @@ THE TERMINAL
 - BLOCK_HEIGHT, PREV_HASH, PAYOUT_ADDR, NET_TARGET and NONCE_COUNTER for the job being hashed.
 - LIVE_HASH_STREAM shows the last ten hashes; a hash with four or more leading zeros is inverted so a near miss is visible at a glance.
 - SESSION_BEST_SHARE and ALL_TIME_BEST keep the best hash this device has produced, the second one across restarts.
+- WORKERS is an htop-style bar per worker thread, from the core's own per-worker counters, with TURBO 7T or a thermal CAP, plus live hash rate and temperature sparklines.
+- EVENT_LOG is the session log: jobs, shares, link changes and thermal steps, newest first.
+- The TURBO line and the START / STOP and POOL & PAYOUT buttons sit at the bottom edge; everything above them stretches to fill the screen.
 - POOL & PAYOUT opens the pool presets, a custom endpoint field, and the payout target prompt with paste and QR scan.
 
 PAYOUT ADDRESS

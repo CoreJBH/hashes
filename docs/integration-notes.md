@@ -77,7 +77,7 @@ The custom field accepts `stratum+ssl://host:port`, `stratum+tls://host:port` an
 
 - `./gradlew :app:assembleDebug` with NDK 30.0.16248370 and CMake 3.22.1: builds,
   and the APK carries `lib/arm64-v8a/libhashes.so` with the ten JNI symbols.
-- `./gradlew :app:testDebugUnitTest`: 149 tests, 0 failures.
+- `./gradlew :app:testDebugUnitTest`: 173 tests, 0 failures.
 - `./gradlew :app:lintDebug`: no errors (warnings are newer-dependency notices and
   a few typography hints).
 - `./gradlew :app:assembleRelease -Phashes.unsignedRelease=true`: R8 minified
@@ -87,6 +87,32 @@ The custom field accepts `stratum+ssl://host:port`, `stratum+tls://host:port` an
 - Only `sha256_arm64_crypto.c.o` contains SHA-2 instructions; the other objects
   contain none, which is the property the SIGILL argument rests on.
 - The C test sources compile and link for `arm64-v8a` with `-Werror`.
+
+## The session, the service and the screen
+
+The Phase 3 tree owned the session inside `MinerViewModel` and closed it on
+`ON_STOP`. A session that survives the screen cannot live in a view model, so the
+work moved down one layer:
+
+- `session/MiningSession.kt` is the process-wide session: engine, `StratumClient`,
+  `ThermalGuard`, the tracker and one one-second loop that refreshes the snapshot,
+  reads the heat, drains found shares and submits them. Both the service and the
+  view model reach the same instance through `MiningSession.get(context)`, and the
+  session's state is a `StateFlow`, so a terminal opened on a running session shows
+  it without asking the service for anything.
+- `service/MinerForegroundService.kt` is a `dataSync` foreground service with a
+  `STOP` action, a one-second notification refresh and the three exits the brief
+  asks for: `ACTION_STOP`, `onTaskRemoved` and the button's `stopService` (which
+  ends in `onDestroy`). `START_NOT_STICKY`, so no session is ever resurrected.
+- `MinerViewModel` is now only the frame source: a 30 fps engine poll, the hash
+  stream, the worker rates and the graphs, started on `ON_START` and stopped on
+  `ON_STOP`. It never opens a socket and never stops the session.
+
+`NativeMiner` gained one symbol, `nativePollThreadHashes`, so the `WORKERS` panel
+draws each thread's own rate instead of dividing the total by the thread count.
+It is the only contract change; `NativeBridgeContractTest` compares the
+declarations with `jni_bridge.cpp` and caught nothing, and the C test checks that
+the per-worker slots add up to the job total.
 
 ## What has not been verified
 
@@ -107,6 +133,14 @@ The custom field accepts `stratum+ssl://host:port`, `stratum+tls://host:port` an
   conversion are unit tested.
 - No real-device session: hash rate, temperature behaviour and share acceptance
   on a low-difficulty pool are unmeasured.
+- **Background behaviour is not exercised here.** The foreground service, its
+  notification refresh, the `POST_NOTIFICATIONS` request, `onTaskRemoved` and the
+  Android 15+ `dataSync` timeout compile and pass lint, but no device has been left
+  on the home screen with a session running; that is the first thing to try on the
+  next real-device pass.
+- **The weighted layout is not rendered here.** It is unit-testable only as far as
+  the worker/sparkline formatting goes; the two-panel weight split and the compact
+  scrolling fallback need a device or a preview to confirm.
 
 ## Things left for Phase 4
 

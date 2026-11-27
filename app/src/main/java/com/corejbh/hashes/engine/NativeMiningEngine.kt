@@ -23,6 +23,7 @@ class NativeMiningEngine(
     private var turbo = false
 
     private val counters = LongArray(NativeMinerBinding.Counter.SIZE)
+    private val workerCounters = LongArray(NativeMinerBinding.MAX_THREADS)
     private val hashBuffer = ByteArray(32)
     private val bestBuffer = ByteArray(32)
     private val foundBuffer = ByteArray(32)
@@ -94,6 +95,12 @@ class NativeMiningEngine(
             }
             val running = counters[NativeMinerBinding.Counter.STATE] ==
                 NativeMinerBinding.Counter.STATE_RUNNING
+            val workers = binding.pollThreadHashes(workerCounters)
+            val workerHashes = if (workers > 0) {
+                workerCounters.copyOfRange(0, minOf(workers, workerCounters.size))
+            } else {
+                LongArray(0)
+            }
             return EngineSnapshot(
                 running = running,
                 turbo = turbo,
@@ -105,6 +112,7 @@ class NativeMiningEngine(
                 bestHash = if (hasBest) bestBuffer.copyOf() else null,
                 hardwareSha256 = (counters[NativeMinerBinding.Counter.HARDWARE_FLAG] and 1L) == 1L,
                 engineName = name,
+                workerHashes = workerHashes,
             )
         }
     }

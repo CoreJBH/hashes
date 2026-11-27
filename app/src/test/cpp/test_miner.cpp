@@ -68,6 +68,23 @@ int main(void) {
     CHECK(counters[2] > 0, "nonce advanced: %lld", (long long)counters[2]);
     CHECK(counters[4] > 0, "hash rate reported: %lld", (long long)counters[4]);
 
+    /* The per-worker totals the terminal's worker panel draws: one slot in
+     * COOL, every slot of the set in TURBO, and the slots add up to the job
+     * total they were counted into. */
+    int64_t worker_hashes[hashes::NativeMiner::kMaxThreads];
+    int workers = miner.fill_thread_hashes(worker_hashes);
+    CHECK(workers == 1, "COOL reports one worker slot (got %d)", workers);
+    CHECK(worker_hashes[0] > 0, "worker 0 counted hashes: %lld",
+          (long long)worker_hashes[0]);
+    CHECK(worker_hashes[1] == 0, "an idle worker slot reads zero: %lld",
+          (long long)worker_hashes[1]);
+    int64_t slot_sum = 0;
+    for (int index = 0; index < hashes::NativeMiner::kMaxThreads; ++index) {
+        slot_sum += worker_hashes[index];
+    }
+    CHECK(slot_sum == counters[1], "worker slots sum to the job total (%lld vs %lld)",
+          (long long)slot_sum, (long long)counters[1]);
+
     int taken = 0;
     uint8_t digest[HASHES_SHA256_DIGEST_SIZE];
     int64_t nonce = 0;
@@ -95,6 +112,8 @@ int main(void) {
     miner.fill_counters(counters);
     CHECK(counters[3] == miner.max_threads(), "TURBO workers %lld, max threads %d",
           (long long)counters[3], miner.max_threads());
+    CHECK(miner.fill_thread_hashes(worker_hashes) == miner.max_threads(),
+          "every worker slot is reported in TURBO");
 
     /* The thermal step between TURBO and COOL: a lower thread cap. */
     if (miner.max_threads() > 1) {

@@ -1,8 +1,13 @@
 package com.corejbh.hashes
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
@@ -15,7 +20,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -47,20 +54,36 @@ fun HashesApp(viewModel: MinerViewModel = viewModel()) {
     var showScanner by remember { mutableStateOf(false) }
     var scannedValue by remember { mutableStateOf<String?>(null) }
 
-    // Mining only runs while this screen is visible, so the screen must not sleep
-    // under it. The flag is dropped the moment the session stops.
+    val context = LocalContext.current
+
+    /* Android 13+ wants the notification permission before a foreground service
+     * can put its status in the shade. A refusal does not stop the session: the
+     * service runs either way and shows up in the system's own task manager. */
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+
+    // The screen stays awake while a session runs; it does not need to when the
+    // service has the session (the terminal is not the thing keeping it alive).
     val view = LocalView.current
     DisposableEffect(state.mining) {
         view.keepScreenOn = state.mining
         onDispose { view.keepScreenOn = false }
     }
 
+    /* ON_START and ON_STOP drive the frame polling only. The session itself is
+     * the foreground service's; leaving the screen must not stop it. */
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) viewModel.onScreenHidden()
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.onScreenVisible()
+                Lifecycle.Event.ON_STOP -> viewModel.onScreenHidden()
+                else -> Unit
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
+        viewModel.onScreenVisible()
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
@@ -78,8 +101,11 @@ fun HashesApp(viewModel: MinerViewModel = viewModel()) {
                     onToggleMining = {
                         if (state.mining) {
                             viewModel.stopMining()
-                        } else if (!viewModel.startMining()) {
-                            showSettings = true
+                        } else {
+                            requestNotifications(notificationPermission::launch, context)
+                            if (!viewModel.startMining()) {
+                                showSettings = true
+                            }
                         }
                     },
                     onTurboChange = viewModel::setTurbo,
@@ -113,4 +139,17 @@ fun HashesApp(viewModel: MinerViewModel = viewModel()) {
             onClose = { showScanner = false },
         )
     }
+}
+
+/** Asks once, on Android 13+, and never blocks the session on the answer. */
+private fun requestNotifications(
+    launch: (String) -> Unit,
+    context: android.content.Context,
+) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    val granted = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.POST_NOTIFICATIONS,
+    ) == PackageManager.PERMISSION_GRANTED
+    if (!granted) launch(Manifest.permission.POST_NOTIFICATIONS)
 }

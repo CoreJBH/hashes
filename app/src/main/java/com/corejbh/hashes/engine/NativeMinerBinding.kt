@@ -50,6 +50,13 @@ interface NativeMinerBinding {
     /** Fills the eight counter slots described by [Counter]. */
     fun pollCounters(out: LongArray)
 
+    /**
+     * Fills [out] ([MAX_THREADS] long) with the cumulative hashes of each worker
+     * and returns the worker count of the current mode. Slots past that count
+     * are zero; the panel turns the deltas into a per-worker rate.
+     */
+    fun pollThreadHashes(out: LongArray): Int
+
     /** Fills 32 bytes with the most recently hashed digest, internal order. */
     fun pollCurrentHash(out: ByteArray)
 
@@ -84,5 +91,8 @@ interface NativeMinerBinding {
     companion object {
         /** Library name the packaging step must produce: libhashes.so. */
         const val LIBRARY = "hashes"
+
+        /** Worker slots [pollThreadHashes] can fill: the native core's limit. */
+        const val MAX_THREADS = 8
     }
 }

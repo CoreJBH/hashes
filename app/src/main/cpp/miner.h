@@ -55,6 +55,8 @@ class NativeMiner {
 public:
     /** Slot count of the counters array the bridge fills. */
     static constexpr int kCounterSlots = 8;
+    /** Worker slots the per-thread counter array can report. */
+    static constexpr int kMaxThreads = 8;
     /** Found hashes kept for the poll; the oldest is dropped when it is full. */
     static constexpr size_t kFoundQueueSize = 8;
 
@@ -96,6 +98,13 @@ public:
 
     void fill_counters(int64_t out[kCounterSlots]);
 
+    /* Cumulative hashes per worker slot, for the htop-style worker panel.
+     * Writes one slot per worker of the current mode and returns that count:
+     * slots at or past it are written as zero, so a thread cap change never
+     * leaves an old total behind. Counters accumulate across jobs within a
+     * session and are cleared when a session starts. */
+    int fill_thread_hashes(int64_t out[kMaxThreads]);
+
     /* The most recently hashed digest, internal order. False when none yet. */
     bool current_hash(uint8_t out[HASHES_SHA256_DIGEST_SIZE]);
 
@@ -121,7 +130,7 @@ private:
 
     void reset_job_counters();
     void flush_progress(uint64_t count, uint32_t last_nonce,
-                        const uint8_t digest[HASHES_SHA256_DIGEST_SIZE]);
+                        const uint8_t digest[HASHES_SHA256_DIGEST_SIZE], int worker_index);
     void record_found(uint32_t nonce, const uint8_t digest[HASHES_SHA256_DIGEST_SIZE]);
     void consider_best(uint32_t nonce, const uint8_t digest[HASHES_SHA256_DIGEST_SIZE]);
     void update_best_locked(const uint8_t digest[HASHES_SHA256_DIGEST_SIZE]);
@@ -160,6 +169,8 @@ private:
     std::condition_variable wake_cv_;
 
     std::atomic<uint64_t> hashes_;
+    /* One cumulative counter per worker slot; written by its own thread only. */
+    std::atomic<uint64_t> thread_hashes_[kMaxThreads];
     std::atomic<uint32_t> current_nonce_;
     std::atomic<int64_t> started_at_ms_;
 

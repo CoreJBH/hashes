@@ -1,0 +1,543 @@
+package com.corejbh.hashes.session
+
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
+import com.corejbh.hashes.crypto.BitcoinAddressValidator
+import com.corejbh.hashes.crypto.Hex
+import com.corejbh.hashes.data.BestShareRecord
+import com.corejbh.hashes.data.BestShareTracker
+import com.corejbh.hashes.data.MinerSettings
+import com.corejbh.hashes.data.SharedPreferencesBestSharePersistence
+import com.corejbh.hashes.data.SharedPreferencesSettingsStore
+import com.corejbh.hashes.engine.EngineSnapshot
+import com.corejbh.hashes.engine.FallbackHashEngine
+import com.corejbh.hashes.engine.HashWork
+import com.corejbh.hashes.engine.JniMinerBinding
+import com.corejbh.hashes.engine.MiningEngine
+import com.corejbh.hashes.engine.NativeMiningEngine
+import com.corejbh.hashes.network.BlockAssembler
+import com.corejbh.hashes.network.CoinbaseHeight
+import com.corejbh.hashes.network.ConnectionState
+import com.corejbh.hashes.network.MiningJob
+import com.corejbh.hashes.network.MiningWorkSource
+import com.corejbh.hashes.network.PoolEndpoint
+import com.corejbh.hashes.network.ShareSubmission
+import com.corejbh.hashes.network.StratumClient
+import com.corejbh.hashes.network.Target
+import com.corejbh.hashes.network.WorkEvent
+import com.corejbh.hashes.thermal.ThermalGuard
+import com.corejbh.hashes.thermal.ThermalMonitor
+import java.math.BigDecimal
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+
+/** Everything the terminal and the notification draw about the mining session. */
+data class MiningSessionState(
+    val settings: MinerSettings = MinerSettings(),
+    val endpoint: PoolEndpoint? = null,
+    val connection: ConnectionState = ConnectionState.DISCONNECTED,
+    val connectionDetail: String = "OFFLINE",
+    val mining: Boolean = false,
+    val job: MiningJob? = null,
+    val blockHeight: Long? = null,
+    val networkBits: String? = null,
+    val networkDifficulty: BigDecimal? = null,
+    val shareDifficulty: Double = 0.0,
+    val snapshot: EngineSnapshot = EngineSnapshot.IDLE,
+    val sessionBest: BestShareRecord? = null,
+    val allTimeBest: BestShareRecord? = null,
+    val accepted: Int = 0,
+    val rejected: Int = 0,
+    val status: String = "IDLE",
+    val notices: List<String> = emptyList(),
+    val temperatureCelsius: Double? = null,
+    val thermalGuard: Boolean = false,
+    val thermalCapped: Boolean = false,
+    val threadCap: Int = 1,
+    val engineNative: Boolean = false,
+)
+
+/**
+ * The mining session itself: settings, the work source, the hash engine, the
+ * thermal guard and the loop that turns engine counters into state.
+ *
+ * It is process-wide and independent of any screen. `MinerForegroundService`
+ * keeps it running while the app is not on screen, and the terminal only reads
+ * it; nothing here knows about Compose, notifications or activities. Both the
+ * service and the view model reach the same instance through [get], so the
+ * terminal picks up a session that was started before it was opened and the
+ * notification keeps showing it after the terminal closes.
+ *
+ * The selection of engine and work source is made once here, through their
+ * interfaces; the UI has no knowledge of JNI or sockets.
+ */
+class MiningSession private constructor(context: Context) {
+
+    private val appContext: Context = context.applicationContext
+    private val settingsStore = SharedPreferencesSettingsStore(appContext)
+    private val tracker = BestShareTracker(SharedPreferencesBestSharePersistence(appContext))
+
+    private val engine: MiningEngine = createEngine()
+    private val workSource: MiningWorkSource = StratumClient()
+
+    /** MODERATE halves TURBO's workers, two SEVERE readings take TURBO away. */
+    private val thermalGuard = ThermalGuard(engine, maxWorkerCount())
+
+    /** Reads the device's heat and feeds the guard above. */
+    private val thermalMonitor = ThermalMonitor(appContext) { decision ->
+        thermalGuard.onReading(decision)
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val _state = MutableStateFlow(
+        MiningSessionState(
+            settings = settingsStore.load(),
+            sessionBest = tracker.sessionBest(),
+            allTimeBest = tracker.allTimeBest(),
+            engineNative = engineIsNative,
+        ).let { initial ->
+            initial.copy(
+                endpoint = initial.settings.endpoint(),
+                snapshot = engine.snapshot(),
+                threadCap = maxWorkerCount(),
+            )
+        }
+    )
+    val state: StateFlow<MiningSessionState> = _state.asStateFlow()
+
+    private var sessionExtranonce1: String? = null
+    private var sessionExtranonce2Size: Int = 4
+    private var extranonce2Counter: Long = 0
+    private var moduleDifficulty: Double = 0.0
+    private var targetValue: BigDecimal? = null
+    private var pendingJob: MiningJob? = null
+    private var ticker: Job? = null
+    private var engineRunning: Boolean = false
+
+    init {
+        thermalGuard.onUserTurbo(_state.value.settings.turbo)
+        observeWorkEvents()
+        observeThermalGuard()
+    }
+
+    private fun createEngine(): MiningEngine {
+        val binding = JniMinerBinding()
+        return if (binding.available) NativeMiningEngine(binding) else FallbackHashEngine()
+    }
+
+    private val engineIsNative: Boolean
+        get() = engine is NativeMiningEngine && (engine as NativeMiningEngine).isAvailable()
+
+    /** The engine name the settings sheet prints. */
+    val engineName: String
+        get() = if (engineIsNative) "native" else engine.name
+
+    // ---------------------------------------------------------------- controls
+
+    /** True while a session is running, in the terminal or in the background. */
+    val isMining: Boolean
+        get() = _state.value.mining
+
+    /** The settings as saved, for a screen that opens on a running session. */
+    fun currentSettings(): MinerSettings = _state.value.settings
+
+    /**
+     * Starts a session with the saved settings. Returns false when the payout
+     * target or the endpoint cannot be used; the terminal then opens the
+     * settings sheet instead of a notification.
+     */
+    fun start(): Boolean {
+        if (_state.value.mining) return true
+        val settings = settingsStore.load()
+        if (BitcoinAddressValidator.validate(settings.payoutAddress) !is BitcoinAddressValidator.Result.Valid) {
+            update { it.copy(settings = settings, status = "PAYOUT TARGET REQUIRED") }
+            return false
+        }
+        val endpoint = settings.endpointOrNull()
+        if (endpoint == null) {
+            update { it.copy(settings = settings, status = "ENDPOINT INVALID") }
+            return false
+        }
+        tracker.resetSession()
+        sessionExtranonce1 = null
+        pendingJob = null
+        extranonce2Counter = 0
+        engineRunning = false
+        thermalGuard.onUserTurbo(settings.turbo)
+        thermalMonitor.start()
+        update {
+            it.copy(
+                settings = settings,
+                mining = true,
+                endpoint = endpoint,
+                connection = ConnectionState.CONNECTING,
+                connectionDetail = "${endpoint.label} ${endpoint.display} | CONNECTING",
+                status = "CONNECTING",
+                sessionBest = null,
+                accepted = 0,
+                rejected = 0,
+                notices = listOf("CONNECTING TO ${endpoint.display}"),
+            )
+        }
+        startTicker()
+        workSource.connect(endpoint, settings.workerName(), settings.password())
+        return true
+    }
+
+    /** Stops hashing, closes the pool link and drops the thermal listener. */
+    fun stop() {
+        if (!_state.value.mining) return
+        ticker?.cancel()
+        ticker = null
+        engineRunning = false
+        engine.stop()
+        workSource.disconnect()
+        thermalMonitor.stop()
+        update {
+            it.copy(
+                mining = false,
+                connection = ConnectionState.DISCONNECTED,
+                connectionDetail = "OFFLINE",
+                status = "STOPPED",
+                notices = (listOf("MINER STOPPED") + it.notices).take(MAX_NOTICES),
+            )
+        }
+    }
+
+    /** Resets the expiring thermal guard so the user can try TURBO again. */
+    fun clearThermalGuard() {
+        thermalGuard.reset()
+        update {
+            it.copy(
+                thermalGuard = false,
+                notices = (listOf("THERMAL GUARD RESET") + it.notices).take(MAX_NOTICES),
+            )
+        }
+    }
+
+    fun setTurbo(enabled: Boolean) {
+        val applied = thermalGuard.onUserTurbo(enabled)
+        if (enabled && !applied) {
+            update {
+                it.copy(
+                    status = "THERMAL GUARD",
+                    notices = (listOf("THERMAL GUARD: RESET BEFORE TURBO") + it.notices)
+                        .take(MAX_NOTICES),
+                )
+            }
+            return
+        }
+        val settings = _state.value.settings.withTurbo(enabled)
+        settingsStore.save(settings)
+        update {
+            it.copy(
+                settings = settings,
+                thermalGuard = if (enabled) false else it.thermalGuard,
+                notices = (listOf("TURBO ${if (enabled) "ON" else "OFF"}") + it.notices).take(MAX_NOTICES),
+            )
+        }
+    }
+
+    fun applySettings(newSettings: MinerSettings) {
+        val rawAddress = newSettings.payoutAddress
+        val extracted = com.corejbh.hashes.crypto.BitcoinUri.extractAddress(rawAddress) ?: rawAddress
+        val requested = newSettings.withAddress(extracted)
+        /* A TURBO request is refused while the thermal guard is tripped; the
+         * saved setting follows the engine, not the tap. */
+        val normalized = if (!thermalGuard.onUserTurbo(requested.turbo)) {
+            requested.withTurbo(false)
+        } else {
+            requested
+        }
+        settingsStore.save(normalized)
+        update {
+            it.copy(
+                settings = normalized,
+                endpoint = normalized.endpointOrNull(),
+                thermalGuard = if (normalized.turbo) false else it.thermalGuard,
+                notices = (listOf("SETTINGS SAVED") + it.notices).take(MAX_NOTICES),
+            )
+        }
+        if (_state.value.mining) {
+            // A changed endpoint or address needs a fresh session; a changed
+            // turbo flag was applied to the running engine already.
+            stop()
+            start()
+        }
+    }
+
+    /** A fresh reading for a screen frame; the session loop polls on its own too. */
+    fun sampleEngine(): EngineSnapshot = engine.snapshot()
+
+    // ------------------------------------------------------------ work events
+
+    private fun observeWorkEvents() {
+        scope.launch {
+            workSource.events.collect { event -> handleEvent(event) }
+        }
+    }
+
+    private fun handleEvent(event: WorkEvent) {
+        when (event) {
+            is WorkEvent.Connected -> update {
+                it.copy(
+                    connectionDetail = "${event.endpoint.label} ${event.endpoint.display} | HANDSHAKE",
+                    connection = ConnectionState.HANDSHAKE,
+                    status = "HANDSHAKE",
+                )
+            }
+
+            is WorkEvent.SessionStarted -> {
+                sessionExtranonce1 = event.extranonce1
+                sessionExtranonce2Size = event.extranonce2Size
+                update {
+                    it.copy(
+                        connection = ConnectionState.CONNECTED,
+                        connectionDetail = "${it.endpoint?.label ?: "STRATUM"} ${it.endpoint?.display ?: ""} | OK",
+                        status = "WAITING FOR JOB",
+                        notices = (listOf("AUTHORIZED ${event.user}") + it.notices).take(MAX_NOTICES),
+                    )
+                }
+                pendingJob?.let(::startJob)
+            }
+
+            is WorkEvent.Job -> {
+                pendingJob = event.job
+                startJob(event.job)
+            }
+
+            is WorkEvent.Difficulty -> {
+                moduleDifficulty = event.difficulty
+                update {
+                    it.copy(
+                        shareDifficulty = event.difficulty,
+                        notices = (listOf("DIFFICULTY ${event.difficulty}") + it.notices).take(MAX_NOTICES),
+                    )
+                }
+            }
+
+            is WorkEvent.ExtranonceChanged -> {
+                sessionExtranonce1 = event.extranonce1
+                sessionExtranonce2Size = event.extranonce2Size
+            }
+
+            is WorkEvent.ShareAccepted -> update {
+                it.copy(
+                    accepted = it.accepted + 1,
+                    status = "SHARE ACCEPTED",
+                    notices = (listOf("SHARE ACCEPTED ${shortNonce(event.nonce)}") + it.notices).take(MAX_NOTICES),
+                )
+            }
+
+            is WorkEvent.ShareRejected -> update {
+                it.copy(
+                    rejected = it.rejected + 1,
+                    status = "SHARE REJECTED",
+                    notices = (listOf("SHARE REJECTED ${shortNonce(event.nonce)}: ${event.reason}") + it.notices)
+                        .take(MAX_NOTICES),
+                )
+            }
+
+            is WorkEvent.Disconnected -> {
+                engineRunning = false
+                engine.stop()
+                update {
+                    it.copy(
+                        connection = ConnectionState.DISCONNECTED,
+                        connectionDetail = "LOST ${it.endpoint?.display ?: ""}",
+                        status = if (event.retryInMillis > 0) {
+                            "RECONNECT IN ${event.retryInMillis / 1000}s"
+                        } else {
+                            event.reason.uppercase()
+                        },
+                        notices = (listOf("LINK DOWN: ${event.reason}") + it.notices).take(MAX_NOTICES),
+                    )
+                }
+            }
+
+            is WorkEvent.Notice -> update {
+                it.copy(notices = (listOf(event.text) + it.notices).take(MAX_NOTICES))
+            }
+        }
+    }
+
+    /**
+     * Assembles the next job into bytes and hands it to the engine. A new
+     * extranonce2 is chosen for every job so two jobs never share a coinbase.
+     */
+    private fun startJob(job: MiningJob) {
+        val extranonce1 = sessionExtranonce1 ?: return
+        if (!_state.value.mining) return
+        extranonce2Counter = (extranonce2Counter + 1) and 0xffffffffL
+        val extranonce2 = BlockAssembler.extranonce2Hex(extranonce2Counter, sessionExtranonce2Size)
+        val prefix = BlockAssembler.headerPrefix(job, extranonce1, extranonce2)
+        val target = Target.fromCompact(job.networkBits)
+        targetValue = Target.difficulty(job.networkBits)
+        val coinbase = BlockAssembler.coinbase(job.coinbase1, extranonce1, extranonce2, job.coinbase2)
+        val height = CoinbaseHeight.parse(coinbase)
+        val work = HashWork(
+            jobId = job.jobId,
+            headerPrefix = prefix,
+            target = Target.toBytes(target),
+            nonceStart = 0,
+            networkTime = job.networkTime,
+            extranonce2 = extranonce2,
+            difficulty = moduleDifficulty,
+        )
+        if (engineRunning) {
+            engine.updateWork(work)
+        } else {
+            engine.start(work)
+            engineRunning = true
+        }
+        update {
+            it.copy(
+                job = job,
+                blockHeight = height,
+                networkBits = job.networkBits,
+                networkDifficulty = targetValue,
+                status = if (it.mining) "MINING" else it.status,
+                notices = (listOf("JOB ${job.jobId} ${if (job.cleanJobs) "CLEAN" else "APPEND"}") + it.notices)
+                    .take(MAX_NOTICES),
+                connection = ConnectionState.CONNECTED,
+            )
+        }
+    }
+
+    // --------------------------------------------------------------- session loop
+
+    /**
+     * One tick a second while a session runs: the counters the notification and
+     * the screen show, the thermal reading the guard needs, and the drain that
+     * submits a hash as soon as the engine reports one. It runs with the session,
+     * not with the screen, so a found share is submitted from the background too.
+     */
+    private fun startTicker() {
+        ticker?.cancel()
+        ticker = scope.launch {
+            while (isActive) {
+                val snapshot = engine.snapshot()
+                if (snapshot.running) {
+                    drainFoundShares()
+                    tracker.observe(snapshot.currentHash)
+                }
+                thermalGuard.onReading(thermalMonitor.current())
+                val temperature = readTemperature()
+                update {
+                    it.copy(
+                        snapshot = snapshot,
+                        sessionBest = tracker.sessionBest(),
+                        allTimeBest = tracker.allTimeBest(),
+                        temperatureCelsius = temperature ?: it.temperatureCelsius,
+                    )
+                }
+                delay(HOUSEKEEPING_MILLIS)
+            }
+        }
+    }
+
+    private fun drainFoundShares() {
+        while (true) {
+            val found = engine.takeFoundShare() ?: break
+            val jitter = "SH-${Hex.encode(found.hash.copyOfRange(0, 4))}"
+            workSource.submit(
+                ShareSubmission(
+                    jobId = found.work.jobId,
+                    extranonce2Hex = found.work.extranonce2,
+                    networkTime = found.work.networkTime,
+                    nonce = found.nonce,
+                )
+            )
+            update {
+                it.copy(
+                    notices = (listOf("TARGET MET $jitter ${shortNonce(found.nonce)}") + it.notices)
+                        .take(MAX_NOTICES),
+                )
+            }
+        }
+    }
+
+    /** TURBO steps aside when the device is hot; the guard is visible, not silent. */
+    private fun observeThermalGuard() {
+        scope.launch {
+            thermalGuard.state.collect { guard ->
+                update {
+                    it.copy(
+                        thermalGuard = guard.tripped || it.thermalGuard,
+                        thermalCapped = guard.threadsCapped,
+                        threadCap = guard.threadCap,
+                    )
+                }
+                if (!guard.tripped) return@collect
+                val settings = _state.value.settings
+                if (settings.turbo) {
+                    /* Persisted so the next launch starts cool instead of walking
+                     * back into the same wall. */
+                    settingsStore.save(settings.withTurbo(false))
+                }
+                update {
+                    it.copy(
+                        settings = it.settings.withTurbo(false),
+                        thermalGuard = true,
+                        status = "THERMAL GUARD",
+                        notices = (listOf("THERMAL GUARD: TURBO DISABLED") + it.notices)
+                            .take(MAX_NOTICES),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun readTemperature(): Double? {
+        val intent: Intent = appContext.registerReceiver(
+            null,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+        ) ?: return null
+        val tenths = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
+        return if (tenths == Int.MIN_VALUE) null else tenths / 10.0
+    }
+
+    private fun update(transform: (MiningSessionState) -> MiningSessionState) {
+        _state.value = transform(_state.value)
+    }
+
+    private fun shortNonce(nonce: Long): String =
+        "0x" + String.format(java.util.Locale.US, "%08X", nonce and 0xffffffffL)
+
+    companion object {
+        /** Notification and screen both read this often. */
+        const val HOUSEKEEPING_MILLIS = 1_000L
+
+        /** The event log the terminal scrolls; the panel shows as many as fit. */
+        const val MAX_NOTICES = 24
+
+        @Volatile
+        private var instance: MiningSession? = null
+
+        /** The one session of this process. */
+        fun get(context: Context): MiningSession {
+            val existing = instance
+            if (existing != null) return existing
+            return synchronized(this) {
+                instance ?: MiningSession(context).also { instance = it }
+            }
+        }
+
+        /** Mirrors the native worker limit: one core left for the system, at most eight. */
+        fun maxWorkerCount(): Int {
+            val cores = Runtime.getRuntime().availableProcessors()
+            return if (cores > 1) minOf(cores - 1, 8) else 1
+        }
+    }
+}

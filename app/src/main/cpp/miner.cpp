@@ -96,6 +96,9 @@ NativeMiner::NativeMiner(int worker_limit)
     }
     max_threads_.store(limit, std::memory_order_relaxed);
     thread_cap_.store(limit, std::memory_order_relaxed);
+    for (int index = 0; index < kMaxThreads; ++index) {
+        thread_hashes_[index].store(0, std::memory_order_relaxed);
+    }
 
     version_ = std::string("0.1.0 phase-1 ") + backend_;
 }
@@ -142,6 +145,12 @@ void NativeMiner::reset_job_counters() {
         rate_at_ = Clock::now();
         rate_hashes_ = 0;
         rate_ = 0.0;
+    }
+    /* A session starts from zero on every worker slot; a new job inside the
+     * session leaves the per-worker totals alone so the panel's deltas stay
+     * continuous. */
+    for (int index = 0; index < kMaxThreads; ++index) {
+        thread_hashes_[index].store(0, std::memory_order_relaxed);
     }
     started_at_ms_.store(now_ms(), std::memory_order_relaxed);
 }
@@ -328,7 +337,7 @@ bool NativeMiner::walk_nonces(const hashes_block_job &job, int index, uint64_t g
         }
 
         if (pending >= kCheckInterval) {
-            flush_progress(pending, nonce, digest);
+            flush_progress(pending, nonce, digest, index);
             pending = 0;
 
             if (!running_.load(std::memory_order_acquire) ||
@@ -350,14 +359,18 @@ bool NativeMiner::walk_nonces(const hashes_block_job &job, int index, uint64_t g
         }
     }
 
-    flush_progress(pending, job.nonce_start + static_cast<uint32_t>(span - 1), nullptr);
+    flush_progress(pending, job.nonce_start + static_cast<uint32_t>(span - 1), nullptr, index);
     return true;
 }
 
 void NativeMiner::flush_progress(uint64_t count, uint32_t last_nonce,
-                                 const uint8_t digest[HASHES_SHA256_DIGEST_SIZE]) {
+                                 const uint8_t digest[HASHES_SHA256_DIGEST_SIZE],
+                                 int worker_index) {
     if (count > 0) {
         hashes_.fetch_add(count, std::memory_order_relaxed);
+        if (worker_index >= 0 && worker_index < kMaxThreads) {
+            thread_hashes_[worker_index].fetch_add(count, std::memory_order_relaxed);
+        }
     }
     current_nonce_.store(last_nonce, std::memory_order_relaxed);
     if (digest != nullptr) {
@@ -415,6 +428,16 @@ void NativeMiner::fill_counters(int64_t out[kCounterSlots]) {
     }
     out[6] = hardware_sha2_.load(std::memory_order_relaxed) ? 1 : 0;
     out[7] = 0;
+}
+
+int NativeMiner::fill_thread_hashes(int64_t out[kMaxThreads]) {
+    int count = effective_threads();
+    for (int index = 0; index < kMaxThreads; ++index) {
+        out[index] = index < count
+                        ? static_cast<int64_t>(thread_hashes_[index].load(std::memory_order_relaxed))
+                        : 0;
+    }
+    return count;
 }
 
 double NativeMiner::update_rate() {

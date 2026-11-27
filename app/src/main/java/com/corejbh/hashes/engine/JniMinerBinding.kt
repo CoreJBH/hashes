@@ -49,6 +49,9 @@ class JniMinerBinding : NativeMinerBinding {
         if (available) NativeMiner.nativePollCounters(out)
     }
 
+    override fun pollThreadHashes(out: LongArray): Int =
+        if (available) NativeMiner.nativePollThreadHashes(out) else 0
+
     override fun pollCurrentHash(out: ByteArray) {
         if (available) NativeMiner.nativePollCurrentHash(out)
     }

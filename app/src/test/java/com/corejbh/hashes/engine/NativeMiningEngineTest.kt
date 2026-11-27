@@ -22,6 +22,7 @@ class NativeMiningEngineTest {
         val threadCaps = mutableListOf<Int>()
         var foundNonce: Long = -1
         var bestPresent = false
+        val workerHashes = longArrayOf(11, 22, 33, 44)
 
         val counters = LongArray(NativeMinerBinding.Counter.SIZE)
         val hash = ByteArray(32) { 0x11 }
@@ -67,6 +68,11 @@ class NativeMiningEngineTest {
 
         override fun pollCounters(out: LongArray) {
             System.arraycopy(counters, 0, out, 0, counters.size)
+        }
+
+        override fun pollThreadHashes(out: LongArray): Int {
+            System.arraycopy(workerHashes, 0, out, 0, workerHashes.size)
+            return workerHashes.size
         }
 
         override fun pollCurrentHash(out: ByteArray) {
@@ -139,6 +145,16 @@ class NativeMiningEngineTest {
         assertTrue(snapshot.hardwareSha256)
         assertNull(snapshot.bestHash)
         assertEquals("native", snapshot.engineName)
+    }
+
+    @Test
+    fun `per worker totals are copied into the snapshot`() {
+        val binding = FakeBinding()
+        binding.counters[NativeMinerBinding.Counter.STATE] = NativeMinerBinding.Counter.STATE_RUNNING
+        binding.counters[NativeMinerBinding.Counter.THREADS] = 4
+        val engine = NativeMiningEngine(binding)
+        val snapshot = engine.snapshot()
+        assertEquals(listOf(11L, 22L, 33L, 44L), snapshot.workerHashes.toList())
     }
 
     @Test

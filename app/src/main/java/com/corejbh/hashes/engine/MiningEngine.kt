@@ -73,6 +73,12 @@ data class EngineSnapshot(
     val bestHash: ByteArray?,
     val hardwareSha256: Boolean,
     val engineName: String,
+    /**
+     * Cumulative hashes per worker slot of the current mode, empty when the
+     * engine has no per-worker counters. The terminal turns the delta between
+     * two snapshots into the htop-style bars; nothing here is estimated.
+     */
+    val workerHashes: LongArray = LongArray(0),
 ) {
     val currentHashHex: String
         get() = com.corejbh.hashes.crypto.Hex.encode(currentHash.reversedArray())

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- #030604 deep black and #00FF66 phosphor green: the whole palette. -->
+    <color name="background">#FF030604</color>
+    <color name="accent">#FF00FF66</color>
+    <color name="icon_background">#FF030604</color>
+</resources>

@@ -1,0 +1,31 @@
+# Gradle / Android build output
+build/
+.gradle/
+.kotlin/
+captures/
+*.hprof
+local.properties
+.cxx/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Build products: APKs are published as release assets, never committed.
+*.apk
+*.aab
+*.apks
+
+# Keystores and signing material (never committed)
+*.jks
+*.keystore
+keystore/
+keystore.properties
+
+# Python tooling
+__pycache__/
+*.pyc
+
+# Native test binaries
+scripts/out/

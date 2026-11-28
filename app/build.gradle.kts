@@ -94,7 +94,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
 
         // Single ABI. The app ships the SHA-256 engine as native code and every
         // Android phone this is for is arm64; a 32-bit build would need a

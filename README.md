@@ -17,6 +17,12 @@ Real mainnet headers, hashed on the phone. No account. No wallet. No seed.</p>
   <img alt="Stratum V1" src="https://img.shields.io/badge/Pool-Stratum%20V1-f7931a?style=flat-square">
 </p>
 
+<p align="center">
+  <img src="docs/media/hashes-demo.gif" width="360" alt="The splash screen settles on its glow, the terminal opens, and the live hash stream, worker meter, rate and event log move under a running session">
+</p>
+
+<p align="center"><sub>Captured from the app: the real layout, palette and motion. The payout address in the demo is an example value, never a real one.</sub></p>
+
 ```
 root@hashes:~$ ./hashes --mainnet
 
@@ -41,8 +47,10 @@ Play Services: the only thing it knows about you is the address you type or scan
 
 **Download.** Grab the current APK from
 [Releases](../../releases/latest) and install it (allow "install unknown apps"
-for the app you open it with). Google Play does not accept mainnet mining, so
-GitHub Releases and F-Droid are the distribution paths.
+for the app you open it with). The `v1.0.0` release carries
+`hashes-v1.0.0-arm64-release.apk` next to its `SHA256SUMS.txt`. Google Play does
+not accept mainnet mining, so GitHub Releases and F-Droid are the distribution
+paths.
 
 Package `com.corejbh.hashes`, `minSdk` 26, `targetSdk` 36, `arm64-v8a` only.
 
@@ -58,6 +66,18 @@ Package `com.corejbh.hashes`, `minSdk` 26, `targetSdk` 36, `arm64-v8a` only.
 | Scan a payout address from a QR code with CameraX + ZXing, with no Play Services and no ML Kit | Promise a block; the odds line is the honest expected time at the measured rate |
 | Submit a found share against the job it came from, and never reuse a stale job after a reconnect | Report a worker rate or a bar the engine did not produce |
 | Step TURBO down when the phone gets hot, and say so on screen | Use the debug key as a release fallback, or ship an unsigned release without being told to |
+
+## Features
+
+| | |
+| --- | --- |
+| **Hash core** | Double SHA-256 through the ARMv8 crypto extensions (`SHA256H`, `SHA256H2`, `SHA256SU0`, `SHA256SU1`), with a portable FIPS 180-4 C implementation behind one `AT_HWCAP` check: a core without the extension runs the C path instead of faulting |
+| **Pool** | Stratum V1 over TLS (`stratum+ssl://`) or plain TCP (`stratum+tcp://`), built-in presets plus any `host:port`, exponential backoff, and a job that is refreshed rather than reused after a reconnect |
+| **TURBO_MODE** | Every worker thread (cores minus one, at most eight) at background priority, with a two-stage thermal guard: half the workers at the first hot reading, TURBO refused after the second until `[ RESET THERMAL GUARD ]` |
+| **ForegroundService** | The session lives in a `dataSync` foreground service that holds the socket and the workers, with the live rate in the status bar and a `STOP` action there, so leaving the screen does not stop mining |
+| **Payout target** | Typed, pasted, or scanned from a QR code with CameraX and ZXing (no Play Services, no ML Kit); Base58Check, Bech32 and Bech32m checksums are verified before a socket opens |
+| **English only** | UI strings, resources, store listing, scripts and documents: `scripts/verify-english.py` fails the build otherwise |
+| **Open source** | One licence, no account, no analytics, no trackers, no Google Play Services, no wallet, no key material |
 
 ## The terminal
 
@@ -301,14 +321,23 @@ carries the title, descriptions, changelog and 512 px store icon.
   assembly.
 - **Phase 3** — CRT terminal, splash, settings sheet, paste/QR payout target,
   adaptive `#_` icon, store metadata.
-- **Phase 4 (next)** — signed arm64 release, a real-pool session and a
-  real-device thermal run, the site entry, and the reproducible-build check.
+- **Phase 4** — signed arm64 release, a real-pool session and a real-device
+  thermal run, the site entry, and the reproducible-build check. Shipped as
+  **v1.0.0**.
 
 ## Privacy
 
 No analytics, no accounts, no Google Play Services. The only network connection
 is the pool you chose, and the only personal datum the app holds is the payout
 address you entered, in its own preferences file. `PRIVACY.md` has the details.
+
+## Credits
+
+Built as a two-handed project: the code, the CRT terminal, the security
+cross-reviews, the demo capture and the release engineering were done with
+**Gilbert (Pickle)**, who also keeps the build honest - English only, no debug
+key as a release fallback, and no screenshot or demo that shows a value the app
+did not produce.
 
 ## Licence
 

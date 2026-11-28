@@ -4,6 +4,7 @@ import com.corejbh.hashes.crypto.Hex
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.math.MathContext
+import java.math.RoundingMode
 
 /**
  * Mainnet targets and difficulty arithmetic.
@@ -19,7 +20,17 @@ object Target {
     val DIFFICULTY_ONE: BigInteger =
         BigInteger("00000000ffff0000000000000000000000000000000000000000000000000000", 16)
 
+    /** The easiest target a 256-bit hash can beat: every bit set. */
+    val MAX_TARGET: BigInteger = BigInteger.ONE.shiftLeft(256).subtract(BigInteger.ONE)
+
     private val TWO_POW_32: BigDecimal = BigDecimal.valueOf(4_294_967_296.0)
+
+    /**
+     * Enough digits that dividing [DIFFICULTY_ONE] by a pool difficulty keeps the
+     * integer part exact: the dividend already has 68 digits, so the quotient for
+     * any difficulty above about 1e-12 is still whole.
+     */
+    private val SHARE_MATH = MathContext(80, RoundingMode.DOWN)
 
     /** Expands a 4-byte compact target (`1b04864c`) into the full 32-byte target. */
     fun fromCompact(nbitsHex: String): BigInteger {
@@ -49,6 +60,35 @@ object Target {
     }
 
     fun fromBytes(bytes: ByteArray): BigInteger = BigInteger(1, bytes)
+
+    /**
+     * The target a pool's share difficulty stands for: `DIFFICULTY_ONE / difficulty`.
+     *
+     * A share is found against the pool's difficulty, not the network's. The
+     * network target is what a block has to beat and is far out of reach of a
+     * phone, so an engine given it finds nothing to submit for days; the pool's
+     * own difficulty is the bar a share actually has to clear.
+     *
+     * The quotient is clamped to the 256-bit range. A difficulty below about
+     * 2^-32 asks for a target wider than 256 bits, which no 32-byte value can
+     * hold, so it becomes [MAX_TARGET] - the easiest target there is. A
+     * difficulty high enough to push the target under one gives a target of one:
+     * a zero target is one no hash meets, and a share target nothing can meet is
+     * not a share target. A difficulty that is not a positive number (zero, a
+     * negative, NaN, infinity) is read as difficulty one, the pool default,
+     * because there is nothing to divide by.
+     */
+    fun fromDifficulty(difficulty: Double): BigInteger {
+        if (!difficulty.isFinite() || difficulty <= 0.0) return DIFFICULTY_ONE
+        val target = BigDecimal(DIFFICULTY_ONE)
+            .divide(BigDecimal(difficulty), SHARE_MATH)
+            .toBigInteger()
+        return when {
+            target > MAX_TARGET -> MAX_TARGET
+            target.signum() == 0 -> BigInteger.ONE
+            else -> target
+        }
+    }
 
     /** Network difficulty for a compact target. */
     fun difficulty(nbitsHex: String): BigDecimal {

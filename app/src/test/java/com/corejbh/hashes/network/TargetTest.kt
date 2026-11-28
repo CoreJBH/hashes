@@ -5,6 +5,7 @@ import com.corejbh.hashes.crypto.Hex
 import com.corejbh.hashes.crypto.Sha256
 import java.math.BigDecimal
 import java.math.BigInteger
+import java.math.MathContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -70,6 +71,54 @@ class TargetTest {
     fun `an all zero digest is the highest possible share`() {
         val difficulty = Target.hashDifficulty(ByteArray(32))
         assertTrue(difficulty > BigDecimal("1e70"))
+    }
+
+    @Test
+    fun `the difficulty one share target is the difficulty one target`() {
+        assertEquals(Target.DIFFICULTY_ONE, Target.fromDifficulty(1.0))
+    }
+
+    @Test
+    fun `a share target is easier than the network target`() {
+        val network = Target.fromCompact(TestVectors.BLOCK_NBITS)
+        assertTrue(Target.fromDifficulty(1.0) > network)
+        assertTrue(Target.fromDifficulty(0.001) > Target.fromDifficulty(1.0))
+    }
+
+    @Test
+    fun `a share target divides the difficulty one target by the difficulty`() {
+        assertEquals(Target.DIFFICULTY_ONE.shiftRight(1), Target.fromDifficulty(2.0))
+        val target = BigDecimal(Target.fromDifficulty(0.001))
+        val restored = BigDecimal(Target.DIFFICULTY_ONE).divide(target, MathContext(20)).toDouble()
+        assertEquals(0.001, restored, 1e-12)
+    }
+
+    @Test
+    fun `a difficulty below two to the minus thirty two saturates the target`() {
+        assertEquals(Target.MAX_TARGET, Target.fromDifficulty(1e-40))
+        assertTrue(Target.toBytes(Target.fromDifficulty(1e-40)).all { it == 0xFF.toByte() })
+    }
+
+    @Test
+    fun `a difficulty that cannot be divided by is difficulty one`() {
+        assertEquals(Target.DIFFICULTY_ONE, Target.fromDifficulty(0.0))
+        assertEquals(Target.DIFFICULTY_ONE, Target.fromDifficulty(-2.0))
+        assertEquals(Target.DIFFICULTY_ONE, Target.fromDifficulty(Double.NaN))
+        assertEquals(Target.DIFFICULTY_ONE, Target.fromDifficulty(Double.POSITIVE_INFINITY))
+    }
+
+    @Test
+    fun `a target a difficulty pushes under one is one`() {
+        assertEquals(BigInteger.ONE, Target.fromDifficulty(1e70))
+    }
+
+    @Test
+    fun `a digest of exactly the share target clears the bar`() {
+        val target = Target.fromDifficulty(0.001)
+        val exact = Target.toBytes(target).reversedArray()
+        assertTrue(Target.meetsTarget(exact, target))
+        val above = Target.toBytes(target.add(BigInteger.ONE)).reversedArray()
+        assertFalse(Target.meetsTarget(above, target))
     }
 
     @Test

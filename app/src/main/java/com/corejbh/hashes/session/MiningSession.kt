@@ -13,19 +13,15 @@ import com.corejbh.hashes.data.SharedPreferencesBestSharePersistence
 import com.corejbh.hashes.data.SharedPreferencesSettingsStore
 import com.corejbh.hashes.engine.EngineSnapshot
 import com.corejbh.hashes.engine.FallbackHashEngine
-import com.corejbh.hashes.engine.HashWork
 import com.corejbh.hashes.engine.JniMinerBinding
 import com.corejbh.hashes.engine.MiningEngine
 import com.corejbh.hashes.engine.NativeMiningEngine
-import com.corejbh.hashes.network.BlockAssembler
-import com.corejbh.hashes.network.CoinbaseHeight
 import com.corejbh.hashes.network.ConnectionState
 import com.corejbh.hashes.network.MiningJob
 import com.corejbh.hashes.network.MiningWorkSource
 import com.corejbh.hashes.network.PoolEndpoint
 import com.corejbh.hashes.network.ShareSubmission
 import com.corejbh.hashes.network.StratumClient
-import com.corejbh.hashes.network.Target
 import com.corejbh.hashes.network.WorkEvent
 import com.corejbh.hashes.thermal.ThermalGuard
 import com.corejbh.hashes.thermal.ThermalMonitor
@@ -92,6 +88,15 @@ class MiningSession private constructor(context: Context) {
     private val engine: MiningEngine = createEngine()
     private val workSource: MiningWorkSource = StratumClient()
 
+    /**
+     * The jobs of this session, with the one lock their state lives behind:
+     * the extranonce, the extranonce2 counter, the pool difficulty and the work
+     * the engine holds. Work events arrive on the collector and the terminal
+     * resets that state from its own thread, so none of it is a plain field
+     * here any more.
+     */
+    private val sessionJobs = SessionJobs(engine)
+
     /** MODERATE halves TURBO's workers, two SEVERE readings take TURBO away. */
     private val thermalGuard = ThermalGuard(engine, maxWorkerCount())
 
@@ -118,14 +123,12 @@ class MiningSession private constructor(context: Context) {
     )
     val state: StateFlow<MiningSessionState> = _state.asStateFlow()
 
-    private var sessionExtranonce1: String? = null
-    private var sessionExtranonce2Size: Int = 4
-    private var extranonce2Counter: Long = 0
-    private var moduleDifficulty: Double = 0.0
-    private var targetValue: BigDecimal? = null
+    /** A job that arrived before the pool's session was authorized. */
+    @Volatile
     private var pendingJob: MiningJob? = null
+
+    /** The one-second housekeeping loop of a running session. */
     private var ticker: Job? = null
-    private var engineRunning: Boolean = false
 
     /**
      * The last start or stop on this session, so the two run in the order they
@@ -185,10 +188,9 @@ class MiningSession private constructor(context: Context) {
             return false
         }
         tracker.resetSession()
-        sessionExtranonce1 = null
         pendingJob = null
-        extranonce2Counter = 0
-        engineRunning = false
+        sessionJobs.reset()
+        sessionJobs.open()
         thermalGuard.onUserTurbo(settings.turbo)
         thermalMonitor.start()
         update {
@@ -227,7 +229,7 @@ class MiningSession private constructor(context: Context) {
         if (!_state.value.mining) return
         ticker?.cancel()
         ticker = null
-        engineRunning = false
+        sessionJobs.close()
         thermalMonitor.stop()
         update {
             it.copy(
@@ -339,8 +341,7 @@ class MiningSession private constructor(context: Context) {
             }
 
             is WorkEvent.SessionStarted -> {
-                sessionExtranonce1 = event.extranonce1
-                sessionExtranonce2Size = event.extranonce2Size
+                sessionJobs.onExtranonce(event.extranonce1, event.extranonce2Size)
                 update {
                     it.copy(
                         connection = ConnectionState.CONNECTED,
@@ -358,18 +359,23 @@ class MiningSession private constructor(context: Context) {
             }
 
             is WorkEvent.Difficulty -> {
-                moduleDifficulty = event.difficulty
+                /* Applied to the running job straight away, so the engine stops
+                 * mining against the network target as soon as the pool says
+                 * what it really wants. The engine's swap clears its found-hash
+                 * queue, so a share it already reported is sent first. */
+                drainFoundShares()
+                val retargeted = sessionJobs.onDifficulty(event.difficulty)
+                val note = "DIFFICULTY ${event.difficulty}" + if (retargeted) " RETARGET" else ""
                 update {
                     it.copy(
                         shareDifficulty = event.difficulty,
-                        notices = (listOf("DIFFICULTY ${event.difficulty}") + it.notices).take(MAX_NOTICES),
+                        notices = (listOf(note) + it.notices).take(MAX_NOTICES),
                     )
                 }
             }
 
             is WorkEvent.ExtranonceChanged -> {
-                sessionExtranonce1 = event.extranonce1
-                sessionExtranonce2Size = event.extranonce2Size
+                sessionJobs.onExtranonce(event.extranonce1, event.extranonce2Size)
             }
 
             is WorkEvent.ShareAccepted -> update {
@@ -390,8 +396,7 @@ class MiningSession private constructor(context: Context) {
             }
 
             is WorkEvent.Disconnected -> {
-                engineRunning = false
-                engine.stop()
+                sessionJobs.stopEngine()
                 update {
                     it.copy(
                         connection = ConnectionState.DISCONNECTED,
@@ -413,40 +418,23 @@ class MiningSession private constructor(context: Context) {
     }
 
     /**
-     * Assembles the next job into bytes and hands it to the engine. A new
-     * extranonce2 is chosen for every job so two jobs never share a coinbase.
+     * Hands the next job to the engine.
+     *
+     * [SessionJobs] assembles the header and picks a new extranonce2, so two jobs
+     * never share a coinbase, and gives the engine the pool's share target rather
+     * than the network one. What is drawn here stays the network's: `NET_TARGET`
+     * and the difficulty of the job's compact target are the block's, not the
+     * pool's, and the odds line is about finding a block.
      */
     private fun startJob(job: MiningJob) {
-        val extranonce1 = sessionExtranonce1 ?: return
         if (!_state.value.mining) return
-        extranonce2Counter = (extranonce2Counter + 1) and 0xffffffffL
-        val extranonce2 = BlockAssembler.extranonce2Hex(extranonce2Counter, sessionExtranonce2Size)
-        val prefix = BlockAssembler.headerPrefix(job, extranonce1, extranonce2)
-        val target = Target.fromCompact(job.networkBits)
-        targetValue = Target.difficulty(job.networkBits)
-        val coinbase = BlockAssembler.coinbase(job.coinbase1, extranonce1, extranonce2, job.coinbase2)
-        val height = CoinbaseHeight.parse(coinbase)
-        val work = HashWork(
-            jobId = job.jobId,
-            headerPrefix = prefix,
-            target = Target.toBytes(target),
-            nonceStart = 0,
-            networkTime = job.networkTime,
-            extranonce2 = extranonce2,
-            difficulty = moduleDifficulty,
-        )
-        if (engineRunning) {
-            engine.updateWork(work)
-        } else {
-            engine.start(work)
-            engineRunning = true
-        }
+        val started = sessionJobs.startJob(job) ?: return
         update {
             it.copy(
                 job = job,
-                blockHeight = height,
+                blockHeight = started.blockHeight,
                 networkBits = job.networkBits,
-                networkDifficulty = targetValue,
+                networkDifficulty = started.networkDifficulty,
                 status = if (it.mining) "MINING" else it.status,
                 notices = (listOf("JOB ${job.jobId} ${if (job.cleanJobs) "CLEAN" else "APPEND"}") + it.notices)
                     .take(MAX_NOTICES),

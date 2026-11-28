@@ -155,10 +155,41 @@ three are closed on `main`.
   `MutableStateFlow.update`, and every transform is a pure function of the
   previous state, so a retry is safe.
 
-Still open, not touched by this pass: the session's own `sessionExtranonce1`,
-`pendingJob`, `extranonce2Counter` and `engineRunning` are plain fields written
-from both dispatchers. The published state is now consistent; those fields are
-not atomic, and the same class of fix would apply to them.
+Still open after that pass, and closed by the next one: the session's own
+`sessionExtranonce1`, `pendingJob`, `extranonce2Counter` and `engineRunning` were
+plain fields written from both dispatchers.
+
+## The share target, and the session's job state
+
+A cross-review bug that would have made the app useless on a real pool: the
+engine was handed `job.networkBits`, the compact target a *block* has to beat.
+The network difficulty is in the billions and a phone hashes at megahashes per
+second, so the engine had nothing to report and the pool never saw a share - the
+session ran, the counters moved, and nothing was ever submitted.
+
+`Target.fromDifficulty` turns a pool difficulty into the target the engine mines
+against - `DIFFICULTY_ONE / difficulty`, clamped to the 256-bit range - and a job
+now goes out with that share target. The network target stands in only until the
+pool announces a difficulty, because a share the pool would reject is worse than
+no share. The panel keeps showing the network target and the network difficulty
+of the job being hashed, since that is what the block race is about, and the
+odds line still measures finding a block.
+
+`mining.set_difficulty` often arrives on a job that already runs, so it is
+applied through `engine.updateWork` at once instead of waiting for the next
+`mining.notify`. The header and the extranonce2 stay those the engine is walking,
+so a share found before or after the change goes out with the same job id; only
+the bar moves. The engine's swap restarts its job counters and clears its
+found-hash queue, so the session drains a queued share before it swaps.
+
+The fields the earlier pass left open now live in `session/SessionJobs.kt`: one
+lock covers the extranonce, the extranonce2 counter, the pool difficulty and the
+work the engine holds, plus every engine call that reads them. `SessionJobsTest`
+starts 100 jobs from four threads and gets 100 distinct extranonce2 values, shows
+that a job cannot start once the session is closed, and that a difficulty with no
+running job is remembered for the next one instead of being dropped.
+`pendingJob` is `@Volatile`: written by the collector, cleared by a start on
+another thread.
 
 ## What has not been verified
 

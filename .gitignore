@@ -31,3 +31,4 @@ __pycache__/
 # Native test binaries and JVM crash logs
 scripts/out/
 hs_err_pid*.log
+replay_pid*.log

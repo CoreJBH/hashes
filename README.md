@@ -243,7 +243,7 @@ directories so no build-host path reaches an object file.
 ## Tests
 
 ```sh
-./gradlew :app:testDebugUnitTest     # 202 JVM tests
+./gradlew :app:testDebugUnitTest     # 217 JVM tests
 ./gradlew :app:lintDebug             # no errors; warnings are dependency versions
 python3 scripts/verify-english.py    # English only, brand only in the package name
 ```
@@ -258,11 +258,14 @@ The JVM suite covers the parts a device is not needed for:
 - Stratum message parsing from real payloads, the client over a fake transport
   (subscribe, authorize, notify, submit, share reply, refused authorization),
   backoff, endpoint parsing
-- compact target arithmetic and difficulty, address validation for every format
-  including checksum typos and testnet refusal
+- compact target arithmetic and difficulty, the share target a pool difficulty
+  stands for, and address validation for every format including checksum typos
+  and testnet refusal
 - the JNI declarations against the C++ exports (names, `Boolean`/`Long` returns,
   the thread cap), the counter layout, and the thermal policy and guard
 - best-share persistence, formatting, the hash stream ring buffer
+- the share target of the job the engine runs, a difficulty applied to a job
+  already running, and the session's job state under start, retarget and stop
 
 The C core has its own tests, run on the host and, for the ARMv8 path, for
 `arm64-v8a` under qemu:

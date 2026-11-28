@@ -163,9 +163,9 @@ plain fields written from both dispatchers.
 
 A cross-review bug that would have made the app useless on a real pool: the
 engine was handed `job.networkBits`, the compact target a *block* has to beat.
-The network difficulty is in the billions and a phone hashes at megahashes per
-second, so the engine had nothing to report and the pool never saw a share - the
-session ran, the counters moved, and nothing was ever submitted.
+The network difficulty is many orders of magnitude beyond what a phone can reach,
+so the engine had nothing to report and the pool never saw a share - the session
+ran, the counters moved, and nothing was ever submitted.
 
 `Target.fromDifficulty` turns a pool difficulty into the target the engine mines
 against - `DIFFICULTY_ONE / difficulty`, clamped to the 256-bit range - and a job

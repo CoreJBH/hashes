@@ -101,21 +101,12 @@ fun SplashScreen(onFinished: () -> Unit, modifier: Modifier = Modifier) {
             .background(Crt.Background)
             .crtScanlines(alpha = 0.09f)
     ) {
-        // The glow behind the mark and the moving scan band.
+        // The moving scan band and the glitch bars. The glow belongs to the
+        // mark itself, so it is drawn under the mark below.
         Box(
             Modifier
                 .fillMaxSize()
                 .drawBehind {
-                    val center = Offset(size.width / 2f, size.height * 0.40f)
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Crt.Glow, Color.Transparent),
-                            center = center,
-                            radius = size.minDimension * 0.42f,
-                        ),
-                        radius = size.minDimension * 0.42f,
-                        center = center,
-                    )
                     val bandY = size.height * sweep
                     drawRect(
                         brush = Brush.verticalGradient(
@@ -147,6 +138,24 @@ fun SplashScreen(onFinished: () -> Unit, modifier: Modifier = Modifier) {
             Box(
                 Modifier
                     .size(136.dp)
+                    .drawBehind {
+                        // Centred on the mark itself rather than at a guessed
+                        // fraction of the screen height, so the glow sits under
+                        // `#_` on every screen shape. It is drawn before the
+                        // tile's own black fill and before the jitter layer, so
+                        // it stays steady and unclipped around the tile.
+                        val center = Offset(size.width / 2f, size.height / 2f)
+                        val radius = size.minDimension * 1.6f
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(Crt.Glow, Color.Transparent),
+                                center = center,
+                                radius = radius,
+                            ),
+                            radius = radius,
+                            center = center,
+                        )
+                    }
                     .graphicsLayer {
                         translationX = jitter
                         alpha = flicker

@@ -13,8 +13,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.corejbh.hashes.R
@@ -79,53 +82,79 @@ fun HashStreamPanel(
             text = stringResource(R.string.label_live_stream),
             trailing = "[64-HEX]",
         )
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            val lineHeight = with(LocalDensity.current) { STREAM_LINE_HEIGHT.toDp() }
-            val lines = (maxHeight / lineHeight).toInt().coerceAtLeast(MIN_STREAM_LINES)
-            StreamLines(state.stream, lines)
-        }
-    }
-}
-
-@Composable
-private fun StreamLines(samples: List<HashStream.Sample>, lines: Int) {
-    Column(Modifier.fillMaxWidth()) {
-        for (sample in HashStream.rows(samples, lines)) {
-            if (sample != null) {
-                StreamLine(hex = sample.hex, highlight = sample.worthHighlighting, dim = false)
-            } else {
-                EmptyStreamLine()
-            }
+        BoxWithConstraints(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .clipToBounds()
+        ) {
+            StreamLines(
+                samples = state.stream,
+                lines = fittedLineCount(maxHeight, STREAM_LINE_HEIGHT, MIN_STREAM_LINES),
+                height = maxHeight,
+            )
         }
     }
 }
 
 /**
- * A row the stream has not reached yet. It keeps the line height and draws
- * nothing: a row of zeros would read as a hash the device never produced.
+ * Rows to draw in a panel [height] tall: every line of [lineHeight] that fits,
+ * and never fewer than [floor] even when the layout hands the panel less.
  */
 @Composable
-private fun EmptyStreamLine() {
-    val height = with(LocalDensity.current) { STREAM_LINE_HEIGHT.toDp() }
-    Box(
+private fun fittedLineCount(height: Dp, lineHeight: TextUnit, floor: Int): Int {
+    val line = with(LocalDensity.current) { lineHeight.toDp() }
+    return (height / line).toInt().coerceAtLeast(floor)
+}
+
+/**
+ * The rows themselves.
+ *
+ * The column is pinned to the height the panel was given and every row takes an
+ * equal share of it, so the rows close the panel to its last pixel: a count
+ * computed from the assumed line height alone left the bottom of the panel black
+ * whenever a row came out shorter than that assumption.
+ */
+@Composable
+private fun StreamLines(samples: List<HashStream.Sample>, lines: Int, height: Dp) {
+    Column(
         Modifier
             .fillMaxWidth()
             .height(height)
-    )
+    ) {
+        for (sample in HashStream.rows(samples, lines)) {
+            val modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+            if (sample != null) {
+                StreamLine(
+                    hex = sample.hex,
+                    highlight = sample.worthHighlighting,
+                    modifier = modifier,
+                )
+            } else {
+                // A row the stream has not reached yet: it holds its share of
+                // the panel and draws nothing, because a row of zeros would
+                // read as a hash the device never produced.
+                Box(modifier.background(Crt.Background))
+            }
+        }
+    }
 }
 
 @Composable
-private fun StreamLine(hex: String, highlight: Boolean, dim: Boolean) {
+private fun StreamLine(
+    hex: String,
+    highlight: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val background = if (highlight) Crt.InverseBackground else Crt.Background
-    val color = when {
-        highlight -> Crt.InverseText
-        dim -> Crt.PhosphorFaint
-        else -> Crt.PhosphorDim
-    }
+    val color = if (highlight) Crt.InverseText else Crt.PhosphorDim
     Box(
-        Modifier
-            .fillMaxWidth()
+        modifier
             .background(background)
+            .padding(horizontal = 1.dp),
+        contentAlignment = Alignment.CenterStart,
     ) {
         Text(
             text = hex,
@@ -136,7 +165,6 @@ private fun StreamLine(hex: String, highlight: Boolean, dim: Boolean) {
                 color = color,
             ),
             maxLines = 1,
-            modifier = Modifier.padding(horizontal = 1.dp),
         )
     }
 }
@@ -230,26 +258,48 @@ fun EventLogPanel(
             text = stringResource(R.string.label_event_log),
             trailing = "[${state.notices.size}]",
         )
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            val lineHeight = with(LocalDensity.current) { LOG_LINE_HEIGHT.toDp() }
-            val lines = (maxHeight / lineHeight).toInt().coerceAtLeast(MIN_LOG_LINES)
-            LogLines(state.notices, lines)
+        BoxWithConstraints(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .clipToBounds()
+        ) {
+            LogLines(
+                notices = state.notices,
+                lines = fittedLineCount(maxHeight, LOG_LINE_HEIGHT, MIN_LOG_LINES),
+                height = maxHeight,
+                lineHeight = with(LocalDensity.current) { LOG_LINE_HEIGHT.toDp() },
+            )
         }
     }
 }
 
+/** The log rows, pinned to the panel height the same way the stream is. */
 @Composable
-private fun LogLines(notices: List<String>, lines: Int) {
-    Column(Modifier.fillMaxWidth()) {
+private fun LogLines(notices: List<String>, lines: Int, height: Dp, lineHeight: Dp) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .height(height)
+    ) {
         if (notices.isEmpty()) {
-            LogLine("> " + stringResource(R.string.label_awaiting_command), dim = true)
+            LogLine(
+                text = "> " + stringResource(R.string.label_awaiting_command),
+                dim = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(lineHeight),
+            )
         } else {
             for (index in 0 until lines) {
                 val notice = notices.getOrNull(index)
+                val modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
                 if (notice != null) {
-                    LogLine("> $notice", dim = false)
+                    LogLine("> $notice", dim = false, modifier = modifier)
                 } else {
-                    LogLine(">", dim = true)
+                    LogLine(">", dim = true, modifier = modifier)
                 }
             }
         }
@@ -257,14 +307,16 @@ private fun LogLines(notices: List<String>, lines: Int) {
 }
 
 @Composable
-private fun LogLine(text: String, dim: Boolean) {
-    Text(
-        text = text,
-        style = TerminalTextStyle.copy(
-            color = if (dim) Crt.PhosphorFaint else Crt.PhosphorDim,
-            fontSize = 10.sp,
-            lineHeight = LOG_LINE_HEIGHT,
-        ),
-        maxLines = 1,
-    )
+private fun LogLine(text: String, dim: Boolean, modifier: Modifier = Modifier) {
+    Box(modifier, contentAlignment = Alignment.CenterStart) {
+        Text(
+            text = text,
+            style = TerminalTextStyle.copy(
+                color = if (dim) Crt.PhosphorFaint else Crt.PhosphorDim,
+                fontSize = 10.sp,
+                lineHeight = LOG_LINE_HEIGHT,
+            ),
+            maxLines = 1,
+        )
+    }
 }

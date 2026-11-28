@@ -47,14 +47,14 @@ class MinerNotificationContentTest {
     }
 
     @Test
-    fun `the mode is in the title and the expanded lines`() {
+    fun `the default mode is not named`() {
         val content = MinerNotificationContent.of(state())
-        assertEquals("HASHES \u00b7 COOL", content.title)
-        assertTrue(content.bigText.contains("COOL"))
+        assertEquals("HASHES", content.title)
+        assertFalse(content.title.contains("COOL"))
+        assertFalse(content.bigText.contains("COOL"))
         assertTrue(content.bigText.contains("39C"))
         assertTrue(content.bigText.contains("BLOCK 977,840"))
         assertTrue(content.bigText.contains("SHARES A:0 R:0"))
-        assertFalse(content.bigText.contains("TURBO"))
     }
 
     @Test
@@ -63,6 +63,12 @@ class MinerNotificationContentTest {
         assertEquals("HASHES \u00b7 TURBO", content.title)
         assertTrue(content.bigText.contains("TURBO"))
         assertTrue(content.bigText.contains("7T"))
+    }
+
+    @Test
+    fun `turbo keeps the temperature on the expanded line`() {
+        val content = MinerNotificationContent.of(state(turbo = true, threads = 7))
+        assertTrue(content.bigText.startsWith("STRATUM+TLS OK \u00b7 TURBO \u00b7 39C"))
     }
 
     @Test

@@ -19,6 +19,7 @@ import com.corejbh.hashes.ui.Sparkline
 import com.corejbh.hashes.ui.WorkerMeter
 import com.corejbh.hashes.ui.theme.Crt
 import com.corejbh.hashes.util.Format
+import com.corejbh.hashes.util.ModeLabels
 import java.util.Locale
 
 /**
@@ -27,8 +28,8 @@ import java.util.Locale
  *
  * Every number here is a difference of two readings the core published, taken a
  * second apart; a worker that hashed nothing shows an empty bar rather than a
- * share of the total. The header says how many workers the mode runs and, when
- * the thermal guard has capped TURBO, that it is capped and to what.
+ * share of the total. The header carries the thread count, with `TURBO` in front
+ * of it only while TURBO runs and `GUARD` once the heat took TURBO away.
  */
 @Composable
 fun MonitorPanel(state: MinerUiState, modifier: Modifier = Modifier) {
@@ -40,7 +41,13 @@ fun MonitorPanel(state: MinerUiState, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth()) {
         SectionTitle(
             text = stringResource(R.string.label_workers),
-            trailing = workerTrailer(state),
+            trailing = ModeLabels.workerTrailer(
+                turbo = state.settings.turbo,
+                guard = state.thermalGuard,
+                threads = state.snapshot.threads,
+                capped = state.thermalCapped,
+                threadCap = state.threadCap,
+            ),
         )
         if (!running) {
             Text(
@@ -149,17 +156,5 @@ private fun WorkerRow(index: Int, rate: Double, peak: Double) {
             ),
             maxLines = 1,
         )
-    }
-}
-
-/** `TURBO 7T / CAP 4T`, `COOL 1T`, or `GUARD` once the heat took TURBO away. */
-private fun workerTrailer(state: MinerUiState): String {
-    val mode = if (state.settings.turbo) "TURBO" else "COOL"
-    val workers = state.snapshot.threads
-    val capped = state.settings.turbo && state.thermalCapped
-    return if (capped) {
-        "$mode ${workers}T / CAP ${state.threadCap}T"
-    } else {
-        "$mode ${workers}T"
     }
 }

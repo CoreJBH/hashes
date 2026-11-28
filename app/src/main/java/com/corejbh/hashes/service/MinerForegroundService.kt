@@ -167,6 +167,11 @@ class MinerForegroundService : Service() {
             .setContentText(content.text)
             .setSubText(content.subText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(content.bigText))
+            // A colorized card carries the terminal's phosphor identity into the
+            // shade: the system paints the whole card in this field instead of a
+            // generic surface and switches to light text on top of it.
+            .setColorized(true)
+            .setColor(NOTIFICATION_COLOR)
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -212,6 +217,9 @@ class MinerForegroundService : Service() {
 
         private const val CHANNEL_ID = "mining"
         private const val NOTIFICATION_ID = 0x485348 // "HSH"
+
+        /** Deep phosphor green: white text stays legible on the colorized card. */
+        private const val NOTIFICATION_COLOR = 0xFF2E7D32.toInt()
 
         /** The shade refreshes a little slower than the session loop. */
         private const val UPDATE_INTERVAL_MS = 1_000L

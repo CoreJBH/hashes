@@ -38,6 +38,11 @@ class BestShareTracker(
 
     fun observe(hash: ByteArray): Update {
         if (hash.size != 32) return Update.NONE
+        /* An all-zero digest is not a finding. The core publishes a zeroed
+         * buffer until its first hash completes, and zero is also what a
+         * failed read leaves behind; as a share it would count as difficulty
+         * 1.8e308 and, being unbeatable, freeze the all-time record. */
+        if (hash.all { it == 0.toByte() }) return Update.NONE
         val record = record(hash)
         var update = Update.NONE
         if (isBetter(record, session)) {
@@ -96,6 +101,13 @@ class SharedPreferencesBestSharePersistence(
 
     override fun read(): BestShareRecord? {
         val hash = preferences.getString(KEY_HASH, null) ?: return null
+        /* A build before the zero guard saved the all-zero digest; the record is
+         * worthless and would outrank every real share, so it is dropped here
+         * and the device heals on the first start after the update. */
+        if (hash.isNotEmpty() && hash.all { it == '0' }) {
+            clear()
+            return null
+        }
         val difficulty = preferences.getString(KEY_DIFFICULTY, null)?.toBigDecimalOrNull() ?: return null
         return BestShareRecord(
             hashHex = hash,
@@ -111,6 +123,16 @@ class SharedPreferencesBestSharePersistence(
             .putString(KEY_DIFFICULTY, record.difficulty.toPlainString())
             .putInt(KEY_ZEROS, record.leadingZeros)
             .putLong(KEY_TIME, record.timestampMillis)
+            .apply()
+    }
+
+    /** Removes a stored record that can no longer be trusted. */
+    private fun clear() {
+        preferences.edit()
+            .remove(KEY_HASH)
+            .remove(KEY_DIFFICULTY)
+            .remove(KEY_ZEROS)
+            .remove(KEY_TIME)
             .apply()
     }
 

@@ -40,9 +40,17 @@ class HashStream(private val capacity: Int = DEFAULT_CAPACITY) {
     companion object {
         /**
          * Kept: the live stream panel draws as many lines as the screen has room
-         * for, so the buffer holds a full panel on a tall phone.
+         * for, and a tall phone shows more than two dozen. A buffer shorter than
+         * the panel left the tail of the panel with nothing real to draw.
          */
-        const val DEFAULT_CAPACITY = 24
+        const val DEFAULT_CAPACITY = 64
         const val HIGHLIGHT_ZEROS = 4
+
+        /**
+         * The rows a panel with [lines] places draws, top first. A null row has
+         * no hash yet: the panel leaves it blank rather than inventing zeros.
+         */
+        fun rows(samples: List<Sample>, lines: Int): List<Sample?> =
+            List(lines) { index -> samples.getOrNull(index) }
     }
 }

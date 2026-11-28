@@ -2,7 +2,10 @@ package com.corejbh.hashes.network
 
 import com.corejbh.hashes.TestVectors
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -58,6 +61,47 @@ class StratumClientTest {
 
         fun serverSends(line: String) {
             incoming.offer(line)
+        }
+    }
+
+    /**
+     * A transport whose socket stays open until it is closed, recording the thread
+     * that closed it. It stands in for the TLS socket whose `close_notify` the
+     * platform refuses to write on the main thread.
+     */
+    private class HangingTransport(
+        private val closeFailure: Exception? = null,
+    ) : StratumTransport {
+        val written = CopyOnWriteArrayList<String>()
+        val closed = CountDownLatch(1)
+        val closeThreads = CopyOnWriteArrayList<String>()
+        private val incoming = LinkedBlockingQueue<String>()
+
+        @Volatile
+        var connected = false
+
+        override val isSecure: Boolean = true
+
+        override fun connect() {
+            connected = true
+        }
+
+        override fun readLine(): String? {
+            val line = incoming.take()
+            return if (line == EOF) null else line
+        }
+
+        override fun writeLine(line: String) {
+            written += line
+        }
+
+        override fun setReadTimeout(millis: Int) = Unit
+
+        override fun close() {
+            closeThreads += Thread.currentThread().name
+            incoming.offer(EOF)
+            closed.countDown()
+            closeFailure?.let { throw it }
         }
     }
 
@@ -199,6 +243,60 @@ class StratumClientTest {
             collector.cancel()
             collectorScope.cancel()
             client.disconnect()
+            clientScope.cancel()
+        }
+    }
+
+    @Test
+    fun `disconnect closes the socket away from the calling thread`() = runBlocking {
+        val transport = HangingTransport()
+        val clientScope = CoroutineScope(
+            SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, _ -> }
+        )
+        val client = StratumClient(
+            transportFactory = { transport },
+            scope = clientScope,
+            idleReconnectMs = 60_000,
+        )
+        val caller = Thread.currentThread().name
+        try {
+            client.connect(PoolEndpoint(true, "pool.test", 4333), "bc1qexample.hashes", "x")
+            awaitUntil { transport.written.any { it.contains("mining.subscribe") } }
+
+            /* The terminal's STOP button runs this on the main thread. A TLS
+             * socket close writes a record there, which the platform refuses. */
+            client.disconnect()
+
+            assertTrue("the socket was never closed", transport.closed.await(2, TimeUnit.SECONDS))
+            assertTrue(
+                "closed on the calling thread: ${transport.closeThreads}",
+                transport.closeThreads.none { it == caller },
+            )
+        } finally {
+            clientScope.cancel()
+        }
+    }
+
+    @Test
+    fun `a close that throws does not escape disconnect`() = runBlocking {
+        val transport = HangingTransport(closeFailure = RuntimeException("NetworkOnMainThreadException"))
+        val clientScope = CoroutineScope(
+            SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, _ -> }
+        )
+        val client = StratumClient(
+            transportFactory = { transport },
+            scope = clientScope,
+            idleReconnectMs = 60_000,
+        )
+        try {
+            client.connect(PoolEndpoint(true, "pool.test", 4333), "bc1qexample.hashes", "x")
+            awaitUntil { transport.written.any { it.contains("mining.subscribe") } }
+
+            client.disconnect()
+
+            assertEquals(ConnectionState.DISCONNECTED, client.state.value)
+            assertTrue(transport.closed.await(2, TimeUnit.SECONDS))
+        } finally {
             clientScope.cancel()
         }
     }

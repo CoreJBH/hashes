@@ -90,15 +90,28 @@ fun HashStreamPanel(
 @Composable
 private fun StreamLines(samples: List<HashStream.Sample>, lines: Int) {
     Column(Modifier.fillMaxWidth()) {
-        for (index in 0 until lines) {
-            val sample = samples.getOrNull(index)
+        for (sample in HashStream.rows(samples, lines)) {
             if (sample != null) {
                 StreamLine(hex = sample.hex, highlight = sample.worthHighlighting, dim = false)
             } else {
-                StreamLine(hex = ZERO_LINE, highlight = false, dim = true)
+                EmptyStreamLine()
             }
         }
     }
+}
+
+/**
+ * A row the stream has not reached yet. It keeps the line height and draws
+ * nothing: a row of zeros would read as a hash the device never produced.
+ */
+@Composable
+private fun EmptyStreamLine() {
+    val height = with(LocalDensity.current) { STREAM_LINE_HEIGHT.toDp() }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(height)
+    )
 }
 
 @Composable
@@ -193,8 +206,6 @@ private fun statusLine(state: MinerUiState): String {
     val threads = if (state.snapshot.threads > 0) "${state.snapshot.threads}T" else "-"
     return "${state.status} / $threads / $sessions"
 }
-
-private const val ZERO_LINE = "0000000000000000000000000000000000000000000000000000000000000000"
 
 /** A hash line is drawn at 8 sp; the reader measures the panel in these. */
 val STREAM_LINE_HEIGHT = 11.sp

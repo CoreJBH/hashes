@@ -16,10 +16,13 @@ import androidx.compose.ui.unit.sp
 import com.corejbh.hashes.R
 import com.corejbh.hashes.ui.MinerUiState
 import com.corejbh.hashes.ui.theme.Crt
+import com.corejbh.hashes.util.ModeLabels
 
 /**
  * The top of the terminal: the command line that started the miner, the pool the
- * line is attached to, and the thermal mode badge.
+ * line is attached to, and the temperature badge. The default mode is not named;
+ * the badge grows a `TURBO` only while TURBO runs, and no badge is drawn when
+ * there is neither TURBO nor a reading to show.
  */
 @Composable
 fun HeaderPanel(state: MinerUiState, modifier: Modifier = Modifier) {
@@ -48,14 +51,14 @@ fun HeaderPanel(state: MinerUiState, modifier: Modifier = Modifier) {
                 style = TerminalTextStyle.copy(color = Crt.PhosphorDim, fontSize = 10.sp),
                 maxLines = 1,
             )
-            val mode = if (state.settings.turbo) "TURBO" else "COOL"
-            val degrees = state.temperatureCelsius?.let { String.format(java.util.Locale.US, "%.0f", it) }
-            val badge = if (degrees != null) "$mode · $degrees°C" else mode
-            TerminalBadge(
-                text = badge,
-                inverted = state.settings.turbo,
-                dim = !state.settings.turbo,
-            )
+            val badge = ModeLabels.thermalBadge(state.settings.turbo, state.temperatureCelsius)
+            if (badge.isNotEmpty()) {
+                TerminalBadge(
+                    text = badge,
+                    inverted = state.settings.turbo,
+                    dim = !state.settings.turbo,
+                )
+            }
         }
 
         Row(

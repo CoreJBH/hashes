@@ -79,15 +79,21 @@ information.
   job being hashed, plus the network difficulty and the odds.
 - **Live hash stream**: the newest digests, a near miss (four or more leading
   zeros) inverted so it is visible at a glance, drawn down to the last line the
-  panel has room for.
+  panel has room for. A row that has no digest yet is left blank instead of
+  being filled with zeros the device never produced.
 - **Best shares**: `SESSION_BEST_SHARE` for this run and `ALL_TIME_BEST` across
-  restarts.
+  restarts. An all-zero digest is never recorded as either, and a record left by
+  an older build that did is dropped on the next start.
+- **Header badge**: the temperature alone, so the default mode needs no word of
+  its own; it reads `TURBO · 38°C` while TURBO runs and is absent when there is
+  neither.
 - **Telemetry**: hashrate, tries, nonce counter, thread count, temperature, and the
   engine in use (`NATIVE (ARMV8 SHA2-256)` or `KOTLIN-FALLBACK`).
 - **`WORKERS`**: an `htop`-style bar per worker thread from the core's own
-  per-worker counters, with `TURBO 7T` or `TURBO 4T / CAP 7T` when the thermal
-  guard has capped the set, and live `HASHRATE` and `TEMP` sparklines over the last
-  24 seconds.
+  per-worker counters, headed by the thread count alone (`1T`) or by
+  `TURBO 7T` / `TURBO 7T / CAP 4T` while TURBO runs, and `GUARD` once the heat
+  took TURBO away; live `HASHRATE` and `TEMP` sparklines cover the last 24
+  seconds.
 - **`EVENT_LOG`**: the session's notices (jobs, shares, link changes, thermal
   steps), newest first, filling the height the layout gives it.
 - **`POOL & PAYOUT`**: pool presets, a custom `stratum+ssl://host:port` endpoint,
@@ -149,6 +155,11 @@ job rather than repeating the space.
 
 ## COOL, TURBO and the thermal guard
 
+COOL is the default and is never named on screen: the title reads `HASHES`, the
+header badge carries the temperature alone and the worker line carries the thread
+count alone. Only TURBO is a word, so a glance at any line tells you whether the
+phone is running hot.
+
 - **COOL** (default): one worker, 1.5 ms of hashing in every ~32.5 ms window — a
   30 fps duty cycle that keeps the CPU share low and the frame pacing natural.
 - **TURBO**: every worker thread (cores minus one, at most eight) at background
@@ -171,7 +182,7 @@ service that holds the pool socket and the worker set; the terminal only reads t
 session and turns it into frames. Going back to the home screen or into another
 app pauses the 30 fps polling and nothing else - the hash rate keeps counting,
 found shares keep being submitted, and the status-bar notification refreshes every
-second with the mode, the link state, the live rate and the height.
+second with `TURBO` when it is on, the link state, the live rate and the height.
 
 It ends in exactly three places: the button, the notification's `STOP`, and a
 swipe of the app out of the recent tasks (`onTaskRemoved`). All three stop the
@@ -232,7 +243,7 @@ directories so no build-host path reaches an object file.
 ## Tests
 
 ```sh
-./gradlew :app:testDebugUnitTest     # 173 JVM tests
+./gradlew :app:testDebugUnitTest     # 202 JVM tests
 ./gradlew :app:lintDebug             # no errors; warnings are dependency versions
 python3 scripts/verify-english.py    # English only, brand only in the package name
 ```

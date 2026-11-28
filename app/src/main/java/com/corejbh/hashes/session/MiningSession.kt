@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Everything the terminal and the notification draw about the mining session. */
 data class MiningSessionState(
@@ -126,6 +127,19 @@ class MiningSession private constructor(context: Context) {
     private var ticker: Job? = null
     private var engineRunning: Boolean = false
 
+    /**
+     * The last start or stop on this session, so the two run in the order they
+     * were asked for.
+     *
+     * Stopping the engine joins worker threads and closing the pool socket is
+     * I/O, so a teardown runs off the calling thread: [stop] is reached from the
+     * terminal's button and from the service's `onDestroy`, on the main thread.
+     * A start queues behind that teardown, so a new session never spins its
+     * workers beside the old one's and a late connect cannot outlive a stop.
+     */
+    @Volatile
+    private var lifecycle: Job? = null
+
     init {
         thermalGuard.onUserTurbo(_state.value.settings.turbo)
         observeWorkEvents()
@@ -191,19 +205,29 @@ class MiningSession private constructor(context: Context) {
                 notices = listOf("CONNECTING TO ${endpoint.display}"),
             )
         }
-        startTicker()
-        workSource.connect(endpoint, settings.workerName(), settings.password())
+        /* Queued behind a teardown that may still be running. If a STOP arrives
+         * while this waits, the flag is already down and nothing starts. */
+        enqueue {
+            if (!_state.value.mining) return@enqueue
+            startTicker()
+            workSource.connect(endpoint, settings.workerName(), settings.password())
+        }
         return true
     }
 
-    /** Stops hashing, closes the pool link and drops the thermal listener. */
+    /**
+     * Stops hashing, closes the pool link and drops the thermal listener.
+     *
+     * The visible state flips here, on whatever thread pressed STOP; the engine
+     * join and the socket close go to an I/O thread, because neither belongs on
+     * the main thread - a TLS socket close writes a record, which the platform
+     * forbids there.
+     */
     fun stop() {
         if (!_state.value.mining) return
         ticker?.cancel()
         ticker = null
         engineRunning = false
-        engine.stop()
-        workSource.disconnect()
         thermalMonitor.stop()
         update {
             it.copy(
@@ -213,6 +237,21 @@ class MiningSession private constructor(context: Context) {
                 status = "STOPPED",
                 notices = (listOf("MINER STOPPED") + it.notices).take(MAX_NOTICES),
             )
+        }
+        enqueue {
+            withContext(Dispatchers.IO) {
+                engine.stop()
+                workSource.disconnect()
+            }
+        }
+    }
+
+    /** Runs [block] after the previous start or stop has finished. */
+    private fun enqueue(block: suspend () -> Unit) {
+        val previous = lifecycle
+        lifecycle = scope.launch {
+            previous?.join()
+            block()
         }
     }
 
@@ -431,7 +470,7 @@ class MiningSession private constructor(context: Context) {
                 val snapshot = engine.snapshot()
                 if (snapshot.running) {
                     drainFoundShares()
-                    tracker.observe(snapshot.currentHash)
+                    observeHashes(snapshot)
                 }
                 thermalGuard.onReading(thermalMonitor.current())
                 val temperature = readTemperature()
@@ -445,6 +484,25 @@ class MiningSession private constructor(context: Context) {
                 }
                 delay(HOUSEKEEPING_MILLIS)
             }
+        }
+    }
+
+    /**
+     * Feeds the best-share tracker the digest the engine just finished and, when
+     * the core kept one, the best digest of the job.
+     *
+     * A zeroed buffer is not a hash: the core publishes one until its first
+     * digest completes, and the tracker would read it as the best share there
+     * can ever be. The guard lives here as well as in the tracker because this
+     * loop is what writes the all-time record.
+     */
+    private fun observeHashes(snapshot: EngineSnapshot) {
+        if (snapshot.currentHash.any { it != 0.toByte() }) {
+            tracker.observe(snapshot.currentHash)
+        }
+        val best = snapshot.bestHash
+        if (best != null && best.size == 32 && best.any { it != 0.toByte() }) {
+            tracker.observe(best)
         }
     }
 

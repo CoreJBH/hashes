@@ -45,8 +45,9 @@ without one and the address can still be typed or pasted.
 
 Mining continues when you leave the terminal, and the notification in the status
 bar is how you can tell. The session runs as a `dataSync` foreground service: the
-notification shows `COOL` or `TURBO`, the pool link, the live hash rate and the
-block being hashed, and it carries a `STOP` action that ends the session at once.
+notification shows `TURBO` while TURBO is on, the pool link, the live hash rate
+and the block being hashed, and it carries a `STOP` action that ends the session
+at once. The default mode is not named, so its title is plain `HASHES`.
 Nothing else runs in the background, there is no scheduled work, no wake lock and
 no sensor.
 

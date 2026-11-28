@@ -3,6 +3,7 @@ package com.corejbh.hashes.notification
 import com.corejbh.hashes.network.ConnectionState
 import com.corejbh.hashes.session.MiningSessionState
 import com.corejbh.hashes.util.Format
+import com.corejbh.hashes.util.ModeLabels
 import java.util.Locale
 
 /**
@@ -11,8 +12,9 @@ import java.util.Locale
  * hash rate and the block being hashed, all in the app's plain English.
  *
  * The collapsed line carries the two facts a glance needs (`STRATUM+TLS OK ·
- * 367.6 KH/s`); the expanded view adds the mode, the temperature, the height,
- * the worker count and the share tally.
+ * 367.6 KH/s`); the expanded view adds the mode when it is TURBO, the
+ * temperature, the height, the worker count and the share tally. The default
+ * mode is not named, so its title is plain `HASHES`.
  */
 data class MinerNotificationContent(
     val title: String,
@@ -23,7 +25,6 @@ data class MinerNotificationContent(
     companion object {
 
         fun of(state: MiningSessionState): MinerNotificationContent {
-            val mode = if (state.settings.turbo) "TURBO" else "COOL"
             val rate = Format.hashRate(state.snapshot.hashRate)
             val link = linkLine(state.connection, state.endpoint?.label ?: "STRATUM")
             val height = state.blockHeight?.let { "BLOCK " + Format.count(it) } ?: "BLOCK --"
@@ -32,8 +33,10 @@ data class MinerNotificationContent(
 
             val modeLine = buildString {
                 append(link)
-                append(" \u00b7 ")
-                append(mode)
+                if (state.settings.turbo) {
+                    append(" \u00b7 ")
+                    append(ModeLabels.TURBO)
+                }
                 if (degrees != null) {
                     append(" \u00b7 ")
                     append(degrees)
@@ -43,7 +46,7 @@ data class MinerNotificationContent(
             val sharesLine = "SHARES A:${state.accepted} R:${state.rejected}"
 
             return MinerNotificationContent(
-                title = "HASHES \u00b7 $mode",
+                title = ModeLabels.title(state.settings.turbo),
                 text = "$link \u00b7 $rate",
                 bigText = "$modeLine\n$factsLine\n$sharesLine",
                 subText = height,

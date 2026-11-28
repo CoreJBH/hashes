@@ -58,6 +58,15 @@ class StratumClient(
     private val inflight = ConcurrentHashMap<Long, ShareSubmission>()
     private var connection: Job? = null
 
+    /**
+     * Closing a socket is I/O, and [disconnect] is reached from the terminal's
+     * button on the main thread. A TLS close writes `close_notify`, which the
+     * platform refuses on the main thread with NetworkOnMainThreadException - a
+     * RuntimeException, so it would end the app instead of ending the session.
+     * The close therefore always runs here, on an I/O thread of its own.
+     */
+    private val closer = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     @Volatile
     private var transport: StratumTransport? = null
 
@@ -93,8 +102,8 @@ class StratumClient(
     }
 
     /**
-     * Sends one share. Called from the UI thread, so the write is taken under the
-     * transport's own lock; a share that cannot be written is reported and left
+     * Sends one share. Called from the session loop, so the write is taken under
+     * the transport's own lock; a share that cannot be written is reported and left
      * unsent, never retried against another job.
      */
     override fun submit(share: ShareSubmission) {
@@ -286,13 +295,22 @@ class StratumClient(
         _events.tryEmit(event)
     }
 
+    /**
+     * Hands the open transport to the I/O side to close. The reference is
+     * dropped here, so a share submitted after this point finds no transport
+     * and a reconnect never writes to the old socket.
+     */
     private fun closeTransport() {
-        try {
-            transport?.close()
-        } catch (_: IOException) {
-            // Nothing to report: the connection is being dropped anyway.
-        }
+        val closing = transport ?: return
         transport = null
+        closer.launch {
+            try {
+                closing.close()
+            } catch (_: Exception) {
+                // Nothing to report: the connection is being dropped anyway, and
+                // a close that fails must not take the caller down with it.
+            }
+        }
     }
 
     private fun describe(error: Throwable): String =

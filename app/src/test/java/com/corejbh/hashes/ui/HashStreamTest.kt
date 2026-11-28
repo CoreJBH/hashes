@@ -53,6 +53,40 @@ class HashStreamTest {
         stream.clear()
         assertEquals(0, stream.size)
     }
+
+    @Test
+    fun `the default buffer fills a tall panel`() {
+        /* The panel draws as many lines as the screen has room for, and a tall
+         * phone shows more than the old 24; a shorter buffer left the tail of
+         * the panel with nothing to draw. */
+        assertTrue(HashStream.DEFAULT_CAPACITY >= 64)
+        val stream = HashStream()
+        for (index in 0 until 80) stream.push(index.toString(16).padStart(64, 'a'))
+        assertEquals(HashStream.DEFAULT_CAPACITY, stream.lines().size)
+    }
+
+    @Test
+    fun `empty rows are blank, never a zero hash`() {
+        val stream = HashStream()
+        stream.push("abcd".padEnd(64, 'f'))
+
+        val rows = HashStream.rows(stream.lines(), lines = 12)
+
+        assertEquals(12, rows.size)
+        assertEquals("abcd".padEnd(64, 'f'), rows.first()?.hex)
+        assertTrue(rows.drop(1).all { it == null })
+        assertTrue(rows.none { it?.hex == "0".repeat(64) })
+    }
+
+    @Test
+    fun `a full buffer has no blank rows`() {
+        val stream = HashStream(capacity = 4)
+        for (index in 0 until 4) stream.push(index.toString(16).padStart(64, 'b'))
+
+        val rows = HashStream.rows(stream.lines(), lines = 4)
+
+        assertTrue(rows.all { it != null })
+    }
 }
 
 class AddressBadgeTest {

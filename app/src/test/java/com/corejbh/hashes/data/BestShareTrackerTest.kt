@@ -73,6 +73,36 @@ class BestShareTrackerTest {
     }
 
     @Test
+    fun `an all zero digest is never a share`() {
+        val persistence = MemoryPersistence()
+        val tracker = BestShareTracker(persistence, clock = { 1_000L })
+        assertEquals(BestShareTracker.Update.NONE, tracker.observe(ByteArray(32)))
+        assertNull(tracker.sessionBest())
+        assertNull(tracker.allTimeBest())
+        assertEquals(0, persistence.writes)
+    }
+
+    @Test
+    fun `an all zero digest cannot displace a real record`() {
+        val persistence = MemoryPersistence()
+        val tracker = BestShareTracker(persistence)
+        tracker.observe(strongHash())
+        val record = tracker.allTimeBest()
+
+        assertEquals(BestShareTracker.Update.NONE, tracker.observe(ByteArray(32)))
+        assertEquals(record, tracker.allTimeBest())
+        assertEquals(1, persistence.writes)
+    }
+
+    @Test
+    fun `a zero hex digest is ignored`() {
+        val tracker = BestShareTracker(MemoryPersistence())
+        assertEquals(BestShareTracker.Update.NONE, tracker.observeHex("0".repeat(64)))
+        assertNull(tracker.sessionBest())
+        assertNull(tracker.allTimeBest())
+    }
+
+    @Test
     fun `observe hex reads display order`() {
         val tracker = BestShareTracker(MemoryPersistence())
         // Display order hex of the strong digest: reversed bytes.

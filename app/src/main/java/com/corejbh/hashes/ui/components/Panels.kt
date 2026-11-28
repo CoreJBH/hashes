@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.corejbh.hashes.R
 import com.corejbh.hashes.data.BestShareRecord
+import com.corejbh.hashes.network.Target
 import com.corejbh.hashes.ui.HashStream
 import com.corejbh.hashes.ui.MinerUiState
 import com.corejbh.hashes.ui.theme.Crt
@@ -197,9 +198,12 @@ fun TelemetryPanel(state: MinerUiState, modifier: Modifier = Modifier) {
     val odds = if (difficulty == null) {
         stringResource(R.string.label_unset)
     } else {
-        "1 IN " + Format.hashes(
-            com.corejbh.hashes.network.Target.expectedHashes(difficulty)
-        ) + " (" + Format.duration(state.expectedSeconds) + ")"
+        Format.odds(
+            expectedHashes = Target.expectedHashes(difficulty),
+            seconds = state.expectedSeconds,
+            mining = state.mining,
+            hashesPerSecond = state.snapshot.hashRate,
+        )
     }
     Column(modifier.fillMaxWidth()) {
         Row(

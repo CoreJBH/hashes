@@ -204,8 +204,9 @@ the running service remains listed in the system's task manager.
 - **Mainnet only.** Testnet and regtest addresses are refused before a socket
   opens.
 - **Honest numbers.** Every hash, nonce and share on screen was produced by this
-  device; the odds line is difficulty × 2³² ÷ the measured rate, and each worker
-  bar is a difference of that worker's own counter.
+  device; the odds line is difficulty × 2³² ÷ the measured rate, with the
+  expected time shown only while that rate is a measurement and not the decay
+  left after `STOP`; each worker bar is a difference of that worker's own counter.
 - **Visible in the background, or not at all.** A session that outlives the screen
   runs as a `dataSync` foreground service with its live rate in the status bar and
   a `STOP` action there; stopping it - button, notification or a swipe out of the

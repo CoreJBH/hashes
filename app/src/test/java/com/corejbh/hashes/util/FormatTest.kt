@@ -40,6 +40,44 @@ class FormatTest {
         assertEquals("?", Format.duration(-1.0))
     }
 
+    /** A decayed hash rate turns the expected time into a number no row can hold. */
+    @Test
+    fun `keeps an oversized duration to one power of ten`() {
+        assertEquals("3.17e72 YEARS", Format.duration(1e80))
+        assertEquals("5.70e300 YEARS", Format.duration(Double.MAX_VALUE))
+    }
+
+    @Test
+    fun `switches to a power of ten at a million years`() {
+        assertEquals("999999 YEARS", Format.duration(999_999 * 31_557_600.0))
+        assertEquals("1.00e6 YEARS", Format.duration(1e6 * 31_557_600.0))
+        assertEquals("316.9 YEARS", Format.duration(1e10))
+    }
+
+    @Test
+    fun `shows the expected time only while the rate is worth measuring`() {
+        val hashes = BigDecimal("6.23e23")
+        val odds = "1 IN 6.23e23"
+        assertEquals(odds, Format.odds(hashes, 1e10, mining = false, hashesPerSecond = 1e10))
+        assertEquals(odds, Format.odds(hashes, 1e10, mining = true, hashesPerSecond = 0.9))
+        assertEquals(odds, Format.odds(hashes, 1e10, mining = true, hashesPerSecond = 0.0))
+        assertEquals(
+            "1 IN 6.23e23 (316.9 YEARS)",
+            Format.odds(hashes, 1e10, mining = true, hashesPerSecond = 1.0),
+        )
+    }
+
+    @Test
+    fun `keeps a stopped odds line short at any hash rate`() {
+        val line = Format.odds(
+            expectedHashes = BigDecimal("1e28"),
+            seconds = 1e80,
+            mining = false,
+            hashesPerSecond = 1e-10,
+        )
+        assertEquals("1 IN 1.0e28", line)
+    }
+
     @Test
     fun `formats small difficulties plainly`() {
         assertEquals("0.001", Format.difficulty(BigDecimal("0.001")))

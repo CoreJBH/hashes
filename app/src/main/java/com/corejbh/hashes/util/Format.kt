@@ -61,6 +61,29 @@ object Format {
     /** Hashes as a count at a few significant digits, e.g. "1.90e14". */
     fun hashes(value: BigDecimal): String = difficulty(value)
 
+    /**
+     * The ODDS value: `1 IN 6.23e23`, and the expected time in brackets only
+     * while the engine is hashing at a rate worth measuring.
+     *
+     * A stopped session keeps reporting the rate it decayed to, and the time for
+     * the network difficulty at that rate grows past any number a reader can use
+     * (`1.59e79 YEARS`). The odds stand on their own; the bracket says nothing
+     * there, so it is left off instead of pushing a number across two lines.
+     */
+    fun odds(
+        expectedHashes: BigDecimal,
+        seconds: Double,
+        mining: Boolean,
+        hashesPerSecond: Double,
+    ): String {
+        val head = "1 IN " + hashes(expectedHashes)
+        if (!mining || hashesPerSecond < MEASURABLE_HASH_RATE) return head
+        return "$head (" + duration(seconds) + ")"
+    }
+
+    /** Below one hash per second the rate is decay, not a measurement. */
+    private const val MEASURABLE_HASH_RATE = 1.0
+
     /** Seconds as years, days, hours, minutes or seconds. */
     fun duration(seconds: Double): String = when {
         seconds.isNaN() || seconds < 0 -> "?"
@@ -81,10 +104,26 @@ object Format {
     fun hex(value: ByteArray): String = com.corejbh.hashes.crypto.Hex.encode(value)
 
     private fun trim(value: Double): String {
+        if (abs(value) >= 1e6) return powerOfTen(value)
         if (abs(value) >= 1000) return String.format(Locale.US, "%.0f", value)
         if (abs(value) >= 100) return String.format(Locale.US, "%.1f", value)
         if (abs(value) >= 10) return String.format(Locale.US, "%.2f", value)
         if (abs(value) >= 1) return String.format(Locale.US, "%.2f", value)
         return String.format(Locale.US, "%.3f", value)
+    }
+
+    /**
+     * A value too large for a fixed-point row, as `3.17e72`: `%.0f` would print
+     * every one of its digits and wrap the row onto a second line. The exponent
+     * loses `%e`'s sign and zero padding so it matches `difficulty`'s `1.9e14`.
+     */
+    private fun powerOfTen(value: Double): String {
+        val text = String.format(Locale.US, "%.2e", value)
+        val marker = text.indexOf('e')
+        val exponent = text.substring(marker + 1)
+            .removePrefix("+")
+            .trimStart('0')
+            .ifEmpty { "0" }
+        return text.substring(0, marker) + "e" + exponent
     }
 }
